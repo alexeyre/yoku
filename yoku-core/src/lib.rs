@@ -1,5 +1,6 @@
-pub mod db;
+#![recursion_limit = "2048"]
 
+pub mod db;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

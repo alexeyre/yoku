@@ -8,10 +8,14 @@
   outputs = { self, nixpkgs }: let
     system = "aarch64-darwin";
     pkgs = import nixpkgs { inherit system; };
-    in {
-      devShells.${system}.default = pkgs.mkShell {
-      buildInputs = with pkgs; [
+  in {
+    devShells.${system}.default = pkgs.mkShell {
+
+      nativeBuildInputs = with pkgs; [
         postgresql
+      ];
+
+      buildInputs = with pkgs; [
         diesel-cli
         rustc
         cargo

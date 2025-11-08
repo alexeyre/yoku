@@ -24,6 +24,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    exercisetags (id) {
+        id -> Int4,
+        exercise_id -> Int4,
+        tag_id -> Int4,
+    }
+}
+
+diesel::table! {
     settags (id) {
         id -> Int4,
         set_id -> Int4,
@@ -47,9 +55,18 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(exercisetags -> exercises (exercise_id));
+diesel::joinable!(exercisetags -> tags (tag_id));
 diesel::joinable!(sets -> exercises (exercise_id));
 diesel::joinable!(sets -> workouts (workout_id));
 diesel::joinable!(settags -> sets (set_id));
 diesel::joinable!(settags -> tags (tag_id));
 
-diesel::allow_tables_to_appear_in_same_query!(exercises, sets, settags, tags, workouts,);
+diesel::allow_tables_to_appear_in_same_query!(
+    exercises,
+    exercisetags,
+    sets,
+    settags,
+    tags,
+    workouts,
+);
