@@ -1,7 +1,7 @@
 use diesel::{Associations, Insertable, Queryable};
 //use diesel::prelude::*;
 use crate::db::schema;
-use rust_decimal::Decimal;
+//use rust_decimal::Decimal;
 
 #[derive(Queryable, Debug, Clone)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -40,6 +40,7 @@ pub struct NewTag {
 }
 
 #[derive(Queryable, Debug, Clone)]
+#[diesel(table_name = crate::db::schema::workouts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Workout {
     pub id: i32,
@@ -66,9 +67,9 @@ pub struct Set {
     pub id: i32,
     pub exercise_id: i32,
     pub workout_id: i32,
-    pub weight: Decimal,
+    pub weight: f32,
     pub reps: i32,
-    pub rpe: Option<Decimal>,
+    pub rpe: Option<f32>,
     pub set_number: Option<i32>,
 }
 
@@ -78,9 +79,9 @@ pub struct Set {
 pub struct NewSet {
     pub exercise_id: i32,
     pub workout_id: i32,
-    pub weight: Decimal,
+    pub weight: f32,
     pub reps: i32,
-    pub rpe: Option<Decimal>,
+    pub rpe: Option<f32>,
     pub set_number: Option<i32>,
 }
 

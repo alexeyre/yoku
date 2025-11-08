@@ -12,22 +12,22 @@ diesel::table! {
 }
 
 diesel::table! {
-    sets (id) {
-        id -> Int4,
-        exercise_id -> Int4,
-        workout_id -> Int4,
-        weight -> Numeric,
-        reps -> Int4,
-        rpe -> Nullable<Numeric>,
-        set_number -> Nullable<Int4>,
-    }
-}
-
-diesel::table! {
     exercisetags (id) {
         id -> Int4,
         exercise_id -> Int4,
         tag_id -> Int4,
+    }
+}
+
+diesel::table! {
+    sets (id) {
+        id -> Int4,
+        exercise_id -> Int4,
+        workout_id -> Int4,
+        weight -> Float4,
+        reps -> Int4,
+        rpe -> Nullable<Float4>,
+        set_number -> Nullable<Int4>,
     }
 }
 
