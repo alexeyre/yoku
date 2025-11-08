@@ -36,9 +36,9 @@ async fn create_pool() -> PgPool {
 }
 
 mod tests {
-    use crate::db::*;
-    use diesel_async::{AsyncConnection, RunQueryDsl, AsyncPgConnection};
-    use diesel::sql_query;
+    
+    
+    
     #[tokio::test]
     async fn test_can_initialize_pool() {
         // Initialize pool and ensure it doesn't panic
