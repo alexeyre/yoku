@@ -32,6 +32,8 @@
         createdb -U postgres dev_db
         echo "PostgreSQL running — DATABASE_URL=$DATABASE_URL"
 
+        diesel migration run
+
         cleanup() {
           echo "Stopping Postgres..."
           pg_ctl -D $PGDATA stop > /dev/null
