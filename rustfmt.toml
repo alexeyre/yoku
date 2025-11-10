@@ -1,0 +1,36 @@
+# Rustfmt configuration for yoku project
+
+# Import reordering (requires nightly rustfmt)
+# This groups and sorts imports automatically
+# imports_granularity = "Crate"
+# group_imports = "StdExternalCrate"
+reorder_imports = true
+
+# Format strings for better readability
+# format_strings = true
+
+# Use field init shorthand when possible
+use_field_init_shorthand = true
+
+# Normalize comments
+# normalize_comments = true
+
+# Wrap comments at 100 characters
+# wrap_comments = true
+# comment_width = 100
+
+# Consistent use statement formatting
+# imports_indent = "Block"
+# imports_layout = "Mixed"
+
+# Format code in doc comments
+# format_code_in_doc_comments = true
+
+# Merge derives into a single line when possible
+merge_derives = true
+
+# Other formatting preferences
+edition = "2024"
+max_width = 100
+tab_spaces = 4
+newline_style = "Unix"
