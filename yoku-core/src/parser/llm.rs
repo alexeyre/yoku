@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 // use diesel_async::RunQueryDsl;
 use anyhow::Result;
+use anyhow::anyhow;
+use ollama_rs::generation::parameters::TimeUnit;
 use openai::{Credentials, chat::*};
 use tokio::sync::OnceCell;
-use anyhow::anyhow;
 
 use crate::parser::ParsedSet;
 
@@ -15,9 +16,8 @@ pub trait LlmInterface {
 }
 
 use ollama_rs::generation::completion::request::GenerationRequest;
+use ollama_rs::generation::parameters::KeepAlive;
 use ollama_rs::{Ollama as OllamaSdk, models::ModelOptions};
-
-
 
 fn strip_code_fences(s: &str) -> &str {
     let mut trimmed = s.trim();
@@ -77,21 +77,29 @@ impl LlmInterface for Ollama {
             input
         );
 
-        let options = ModelOptions::default().temperature(0.1);
+        let options = ModelOptions::default().temperature(0.1).num_ctx(128);
 
         let res = self
             .client
             .generate(
                 GenerationRequest::new(self.model.clone(), user_prompt)
                     .options(options)
-                    .system(system_prompt),
+                    .system(system_prompt)
+                    .keep_alive(KeepAlive::Until {
+                        time: 10,
+                        unit: TimeUnit::Minutes,
+                    }),
             )
             .await;
         let res = res?;
         let response = strip_code_fences(res.response.trim());
         match serde_json::from_str(response) {
             Ok(parsed) => Ok(ParsedSet::with_original(parsed, input.into())),
-            Err(e) => Err(anyhow!("Cannot parse LLM output: {}\nGot error: {}", response, e))
+            Err(e) => Err(anyhow!(
+                "Cannot parse LLM output: {}\nGot error: {}",
+                response,
+                e
+            )),
         }
     }
 }

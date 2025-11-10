@@ -6,6 +6,7 @@ use crate::{
     db::get_conn,
     db::models::{Exercise, NewExercise, NewSet, NewWorkout, Set, UpdateSet, Workout},
     db::schema::{exercises, sets, workouts},
+    parser::ParsedSet,
 };
 
 // Workouts
@@ -117,6 +118,43 @@ pub async fn update_set(set_id: i32, update: &UpdateSet) -> Result<Set> {
     let mut conn = get_conn().await;
     diesel::update(sets::table.find(set_id))
         .set(update)
+        .get_result::<Set>(&mut conn)
+        .await
+        .map_err(Into::into)
+}
+
+/// Updates a set from a parsed set description, intelligently merging with the original set.
+/// Only fields provided in the parsed set will be updated; missing fields retain their original values.
+pub async fn update_set_from_parsed(set_id: i32, parsed: &ParsedSet) -> Result<Set> {
+    let mut conn = get_conn().await;
+
+    // Get the original set first
+    let original_set = sets::table.find(set_id).first::<Set>(&mut conn).await?;
+
+    // Resolve exercise: only change if user specified a different one
+    let exercise_id = if !parsed.exercise.is_empty() {
+        let exercise = get_or_create_exercise(&parsed.exercise).await?;
+        // Only update if different from original
+        if exercise.id != original_set.exercise_id {
+            Some(exercise.id)
+        } else {
+            None // No change needed
+        }
+    } else {
+        None // User didn't specify, keep original
+    };
+
+    let update = UpdateSet {
+        workout_id: None, // Never change workout_id on updates
+        exercise_id,
+        reps: parsed.reps,
+        weight: parsed.weight,
+        rpe: Some(parsed.rpe),
+        set_number: None, // Keep original set_number
+    };
+
+    diesel::update(sets::table.find(set_id))
+        .set(&update)
         .get_result::<Set>(&mut conn)
         .await
         .map_err(Into::into)

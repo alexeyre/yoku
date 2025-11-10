@@ -6,7 +6,7 @@ use std::fmt;
 use yoku_core::db::models::{DisplayableSet, Set, Workout};
 use yoku_core::db::operations::{
     create_workout, delete_set, delete_workout, get_all_workouts, get_exercise,
-    get_sets_for_workout, update_set,
+    get_sets_for_workout,
 };
 use yoku_core::parser::llm::LlmInterface;
 use yoku_core::session::Session;
@@ -362,7 +362,8 @@ impl<T: LlmInterface> WorkoutSession<T> {
     fn enter_rentry_mode(&mut self) {
         self.input_mode = SessionInputMode::RenteringSet;
         self.input_buffer.clear();
-        self.status_message = "Enter a set description to replace the existing entry (ESC to cancel): ".to_string();
+        self.status_message =
+            "Enter a set description to replace the existing entry (ESC to cancel): ".to_string();
     }
 
     async fn create_set(&mut self) -> Result<()> {
@@ -379,14 +380,26 @@ impl<T: LlmInterface> WorkoutSession<T> {
 
     async fn replace_set(&mut self) -> Result<()> {
         let parsed_set = self.parser.parse_set_string(&self.input_buffer).await?;
-        let (set, _) = &self.sets[self.selected];
+        let (set, exercise_name) = &self.sets[self.selected];
         let set_id = set.id;
 
-        update_set(set_id, &parsed_set.to_update_set().await).await?;
+        yoku_core::db::operations::update_set_from_parsed(set_id, &parsed_set).await?;
 
         self.input_mode = SessionInputMode::Normal;
         self.input_buffer.clear();
-        self.status_message = format!("Replaced set #{} with {}", 1, 2);
+
+        // Build a nice status message showing what was updated
+        let mut parts = vec![format!("Updated {}", exercise_name)];
+        if let Some(weight) = parsed_set.weight {
+            parts.push(format!("{}kg", weight));
+        }
+        if let Some(reps) = parsed_set.reps {
+            parts.push(format!("x{} reps", reps));
+        }
+        if let Some(rpe) = parsed_set.rpe {
+            parts.push(format!("@{:.1} RPE", rpe));
+        }
+        self.status_message = parts.join(" ");
 
         self.refresh_sets().await?;
         Ok(())
@@ -530,9 +543,7 @@ async fn run_workout_session<T: LlmInterface>(
                     KeyCode::Char('d') | KeyCode::Char('D') => {
                         session.delete_selected().await?;
                     }
-                    KeyCode::Char('e') | KeyCode::Char('E') => {
-                        
-                    }
+                    KeyCode::Char('e') | KeyCode::Char('E') => {}
                     KeyCode::Char('r') | KeyCode::Char('R') => {
                         // re-enter set string
                         session.enter_rentry_mode();
@@ -563,7 +574,6 @@ async fn run_workout_session<T: LlmInterface>(
                     _ => {}
                 },
 
-
                 SessionInputMode::RenteringSet => match key.code {
                     KeyCode::Enter => {
                         if let Err(e) = session.replace_set().await {
@@ -584,7 +594,7 @@ async fn run_workout_session<T: LlmInterface>(
                         session.input_buffer.pop();
                     }
                     _ => {}
-                }
+                },
             }
         }
     }
