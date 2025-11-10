@@ -6,7 +6,7 @@ use std::fmt;
 use yoku_core::db::models::{DisplayableSet, Set, Workout};
 use yoku_core::db::operations::{
     create_workout, delete_set, delete_workout, get_all_workouts, get_exercise,
-    get_sets_for_workout,
+    get_sets_for_workout, get_workout,
 };
 use yoku_core::parser::llm::LlmInterface;
 use yoku_core::session::Session;
@@ -289,6 +289,7 @@ async fn run_workout_selector(mut terminal: DefaultTerminal) -> Result<Option<i3
 
 struct WorkoutSession<T: LlmInterface> {
     workout_id: i32,
+    workout_name: Option<String>,
     sets: Vec<(Set, String)>, // (Set, exercise_name)
     selected: usize,
     status_message: String,
@@ -309,8 +310,12 @@ impl<T: LlmInterface> WorkoutSession<T> {
         let mut session = Session::new_blank().await;
         session.set_workout_id(workout_id).await?;
 
+        let workout = get_workout(&workout_id).await?;
+        let workout_name = workout.name;
+
         let mut workout_session = Self {
             workout_id,
+            workout_name,
             sets: Vec::new(),
             selected: 0,
             status_message: "c: create set | d: delete | e: edit | r: renter | q: quit".to_string(),
@@ -433,12 +438,16 @@ async fn run_workout_session<T: LlmInterface>(
             let chunks = Layout::vertical([
                 Constraint::Length(3),
                 Constraint::Min(1),
-                Constraint::Length(3),
+                Constraint::Length(5), // Increased from 3 to show multi-line errors
             ])
             .split(frame.area());
 
             // Header
-            let header = Paragraph::new(format!("Workout #{}", workout_id))
+            let header_text = match &session.workout_name {
+                Some(name) => format!("Workout #{} - {}", workout_id, name),
+                None => format!("Workout #{}", workout_id),
+            };
+            let header = Paragraph::new(header_text)
                 .style(
                     Style::default()
                         .fg(Color::Cyan)
@@ -518,10 +527,11 @@ async fn run_workout_session<T: LlmInterface>(
                 }
             }
 
-            // Footer with status
+            // Footer with status (with text wrapping for long errors)
             let footer = Paragraph::new(session.status_message.as_str())
                 .style(Style::default().fg(Color::White))
-                .block(Block::default().borders(Borders::ALL).title("Status"));
+                .block(Block::default().borders(Borders::ALL).title("Status"))
+                .wrap(ratatui::widgets::Wrap { trim: false });
             frame.render_widget(footer, chunks[2]);
         })?;
 
@@ -552,10 +562,8 @@ async fn run_workout_session<T: LlmInterface>(
                 },
                 SessionInputMode::CreatingSet => match key.code {
                     KeyCode::Enter => {
-                        session.status_message =
-                            format!("Processing set string: {}", session.input_buffer);
                         if let Err(e) = session.create_set().await {
-                            session.status_message = format!("Error creating set: {}", e);
+                            session.status_message = format!("Error creating set: {:#}", e);
                             session.input_mode = SessionInputMode::Normal;
                             session.input_buffer.clear();
                         }
@@ -577,7 +585,7 @@ async fn run_workout_session<T: LlmInterface>(
                 SessionInputMode::RenteringSet => match key.code {
                     KeyCode::Enter => {
                         if let Err(e) = session.replace_set().await {
-                            session.status_message = format!("Error creating set: {}", e);
+                            session.status_message = format!("Error updating set: {:#}", e);
                             session.input_mode = SessionInputMode::Normal;
                             session.input_buffer.clear();
                         }
@@ -585,7 +593,8 @@ async fn run_workout_session<T: LlmInterface>(
                     KeyCode::Esc => {
                         session.input_mode = SessionInputMode::Normal;
                         session.input_buffer.clear();
-                        session.status_message = "c: create set | d: delete | q: quit".to_string();
+                        session.status_message =
+                            "c: create set | d: delete | r: renter | q: quit".to_string();
                     }
                     KeyCode::Char(c) => {
                         session.input_buffer.push(c);
