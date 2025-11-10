@@ -1,41 +1,47 @@
 use std::sync::Arc;
 
 // use diesel_async::RunQueryDsl;
-use openai::{chat::*, Credentials};
 use anyhow::Result;
+use openai::{Credentials, chat::*};
 use tokio::sync::OnceCell;
 
 use crate::parser::ParsedSet;
 
 #[allow(async_fn_in_trait)] // TODO: if something weird breaks, maybe this is why
 pub trait LlmInterface {
-    async fn parse_set_string(input: &str) -> Result<ParsedSet>;
+    async fn parse_set_string(&self, input: &str) -> Result<ParsedSet>;
+    async fn new(model: Option<String>) -> Result<Box<Self>>;
 }
 
-use ollama_rs::{
-    models::ModelOptions,
-    Ollama as OllamaSdk
-};
 use ollama_rs::generation::completion::request::GenerationRequest;
+use ollama_rs::{Ollama as OllamaSdk, models::ModelOptions};
 
+pub struct Ollama {
+    client: Arc<OllamaSdk>,
+    model: String,
+}
 
-pub struct Ollama;
-
-const OLLAMA_MODEL: &str = "llama3.2:3b";
+const OLLAMA_DEFAULT_MODEL: &str = "llama3.2:3b";
 const OLLAMA_CLIENT: OnceCell<Arc<OllamaSdk>> = OnceCell::const_new();
 
 impl Ollama {
     async fn get_client() -> Result<Arc<OllamaSdk>> {
         Ok(OLLAMA_CLIENT
-           .get_or_init(|| async { Arc::new(OllamaSdk::default()) })
-           .await
-           .clone()
-        )
+            .get_or_init(|| async { Arc::new(OllamaSdk::default()) })
+            .await
+            .clone())
     }
 }
 impl LlmInterface for Ollama {
-    async fn parse_set_string(input: &str) -> Result<ParsedSet> {
-        let client = Self::get_client().await?;
+    async fn new(model: Option<String>) -> Result<Box<Self>> {
+        Ok(Box::new(Self {
+            client: Self::get_client().await?,
+            model: model.unwrap_or_else(|| OLLAMA_DEFAULT_MODEL.to_string()),
+        }))
+    }
+
+    async fn parse_set_string(&self, input: &str) -> Result<ParsedSet> {
+        //let client = Self::get_client().await?;
         let system_prompt = "You are a precise workout set parser. \
                              Your goal is to extract structured information from short workout log strings. \
                              Always return a strict JSON object matching this schema: \
@@ -55,10 +61,16 @@ impl LlmInterface for Ollama {
             input
         );
 
-        let options = ModelOptions::default()
-            .temperature(0.1);
+        let options = ModelOptions::default().temperature(0.1);
 
-        let res = client.generate(GenerationRequest::new(OLLAMA_MODEL.to_string(), user_prompt).options(options).system(system_prompt)).await;
+        let res = self
+            .client
+            .generate(
+                GenerationRequest::new(self.model.clone(), user_prompt)
+                    .options(options)
+                    .system(system_prompt),
+            )
+            .await;
 
         let parsed = serde_json::from_str(&res?.response.trim())?;
         let parsed = ParsedSet::with_original(parsed, input.into());
@@ -66,30 +78,30 @@ impl LlmInterface for Ollama {
     }
 }
 
-
-
-
-
 static OPENAI_CREDS: OnceCell<Credentials> = OnceCell::const_new();
-pub struct OpenAi;
+const OPENAI_DEFAULT_MODEL: &str = "gpt-4o-mini";
+
+pub struct OpenAi {
+    model: String,
+}
 impl OpenAi {
     async fn get_creds() -> Result<Credentials> {
-        Ok(
-            OPENAI_CREDS
-                .get_or_init(|| async {
-                    Credentials::from_env()
-                })
-                .await
-                .clone()
-        )
+        Ok(OPENAI_CREDS
+            .get_or_init(|| async { Credentials::from_env() })
+            .await
+            .clone())
     }
 }
 impl LlmInterface for OpenAi {
-    async fn parse_set_string(input: &str) -> Result<ParsedSet> {
+    async fn new(model: Option<String>) -> Result<Box<Self>> {
+        Ok(Box::new(Self {
+            model: model.unwrap_or_else(|| OPENAI_DEFAULT_MODEL.to_string()),
+        }))
+    }
 
-    let creds = Self::get_creds().await?;
-    println!("CREDS: {}", creds.api_key());
-    let messages = vec![
+    async fn parse_set_string(&self, input: &str) -> Result<ParsedSet> {
+        let creds = Self::get_creds().await?;
+        let messages = vec![
         ChatCompletionMessage {
             role: ChatCompletionMessageRole::System,
             content: Some(
@@ -125,14 +137,14 @@ impl LlmInterface for OpenAi {
             tool_calls: None
         }
     ];
-    let result_completion = ChatCompletion::builder("gpt-4.1-mini", messages.clone())
-        .response_format(ChatCompletionResponseFormat::json_object())
-        .credentials(creds.clone())
-        .temperature(0.1)
-        .create()
-        .await?;
-    let result_message = result_completion.choices.first().unwrap().message.clone();
-    let parsed: ParsedSet = serde_json::from_str(&result_message.content.unwrap().trim())?;
-    Ok(parsed)
+        let result_completion = ChatCompletion::builder(&self.model, messages.clone())
+            .response_format(ChatCompletionResponseFormat::json_object())
+            .credentials(creds.clone())
+            .temperature(0.1)
+            .create()
+            .await?;
+        let result_message = result_completion.choices.first().unwrap().message.clone();
+        let parsed: ParsedSet = serde_json::from_str(&result_message.content.unwrap().trim())?;
+        Ok(parsed)
     }
 }
