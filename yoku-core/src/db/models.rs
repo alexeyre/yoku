@@ -1,7 +1,5 @@
-use diesel::{Associations, Insertable, Queryable};
-//use diesel::prelude::*;
+use diesel::{Associations, Insertable, Queryable, AsChangeset};
 use crate::db::schema;
-//use rust_decimal::Decimal;
 
 #[derive(Queryable, Debug, Clone)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -121,4 +119,43 @@ pub struct ExerciseTag {
 pub struct NewExerciseTag {
     pub exercise_id: i32,
     pub tag_id: i32,
+}
+
+#[derive(AsChangeset, Debug)]
+#[diesel(table_name = schema::exercises)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct UpdateExercise {
+    pub name: Option<String>,
+    pub equipment: Option<Option<String>>,
+    pub primary_muscle: Option<Option<String>>,
+    pub secondary_muscle: Option<Option<String>>,
+    pub description: Option<Option<String>>,
+}
+
+#[derive(AsChangeset, Debug)]
+#[diesel(table_name = schema::tags)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct UpdateTag {
+    pub name: Option<String>,
+}
+
+#[derive(AsChangeset, Debug)]
+#[diesel(table_name = schema::workouts)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct UpdateWorkout {
+    pub name: Option<Option<String>>,
+    pub performed_at: Option<Option<chrono::NaiveDateTime>>,
+    pub notes: Option<Option<String>>,
+}
+
+#[derive(AsChangeset, Debug)]
+#[diesel(table_name = schema::sets)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct UpdateSet {
+    pub exercise_id: Option<i32>,
+    pub workout_id: Option<i32>,
+    pub weight: Option<f32>,
+    pub reps: Option<i32>,
+    pub rpe: Option<Option<f32>>,
+    pub set_number: Option<Option<i32>>,
 }

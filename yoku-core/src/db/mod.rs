@@ -1,6 +1,6 @@
 pub mod models;
-pub mod schema;
 pub mod operations;
+pub mod schema;
 
 use diesel_async::{
     AsyncPgConnection,
@@ -39,9 +39,9 @@ async fn create_pool() -> PgPool {
 #[allow(unused_imports)]
 #[allow(unused_comparisons)]
 mod tests {
-    use diesel::sql_query;
     use crate::db::get_pool;
-    use diesel_async::{AsyncConnection, RunQueryDsl, AsyncPgConnection};
+    use diesel::sql_query;
+    use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 
     #[tokio::test]
     async fn test_can_initialize_pool() {
