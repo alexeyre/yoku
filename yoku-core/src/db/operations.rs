@@ -58,6 +58,14 @@ pub async fn get_exercise(exercise_id: i32) -> Result<Exercise> {
         .map_err(Into::into)
 }
 
+pub async fn get_all_exercises() -> Result<Vec<Exercise>> {
+    let mut conn = get_conn().await;
+    exercises::table
+        .load::<Exercise>(&mut conn)
+        .await
+        .map_err(Into::into)
+}
+
 pub async fn get_or_create_exercise(exercise_name: &str) -> Result<Exercise> {
     let mut conn = get_conn().await;
 

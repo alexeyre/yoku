@@ -5,7 +5,7 @@ use std::fmt;
 
 use yoku_core::db::models::{DisplayableSet, Set, Workout};
 use yoku_core::db::operations::{
-    create_workout, delete_set, delete_workout, get_all_workouts, get_exercise,
+    create_workout, delete_set, delete_workout, get_all_exercises, get_all_workouts, get_exercise,
     get_sets_for_workout, get_workout,
 };
 use yoku_core::parser::llm::LlmInterface;
@@ -297,6 +297,7 @@ struct WorkoutSession<T: LlmInterface> {
     input_buffer: String,
     parser: Box<T>,
     session: Session,
+    known_exercises: Vec<String>, // Cache of exercise names for LLM
 }
 
 enum SessionInputMode {
@@ -313,6 +314,10 @@ impl<T: LlmInterface> WorkoutSession<T> {
         let workout = get_workout(&workout_id).await?;
         let workout_name = workout.name;
 
+        // Fetch all known exercises to help LLM with consistency
+        let exercises = yoku_core::db::operations::get_all_exercises().await?;
+        let known_exercises: Vec<String> = exercises.into_iter().map(|e| e.name).collect();
+
         let mut workout_session = Self {
             workout_id,
             workout_name,
@@ -323,6 +328,7 @@ impl<T: LlmInterface> WorkoutSession<T> {
             input_buffer: String::new(),
             parser,
             session,
+            known_exercises,
         };
 
         workout_session.refresh_sets().await?;
@@ -341,6 +347,10 @@ impl<T: LlmInterface> WorkoutSession<T> {
         if self.selected >= self.sets.len() && self.sets.len() > 0 {
             self.selected = self.sets.len() - 1;
         }
+
+        // Refresh known exercises in case new ones were added
+        let exercises = get_all_exercises().await?;
+        self.known_exercises = exercises.iter().map(|e| e.name.clone()).collect();
 
         Ok(())
     }
@@ -372,7 +382,10 @@ impl<T: LlmInterface> WorkoutSession<T> {
     }
 
     async fn create_set(&mut self) -> Result<()> {
-        let parsed_set = self.parser.parse_set_string(&self.input_buffer).await?;
+        let parsed_set = self
+            .parser
+            .parse_set_string(&self.input_buffer, &self.known_exercises)
+            .await?;
         self.session.add_set_from_parsed(&parsed_set).await?;
 
         self.input_mode = SessionInputMode::Normal;
@@ -384,7 +397,10 @@ impl<T: LlmInterface> WorkoutSession<T> {
     }
 
     async fn replace_set(&mut self) -> Result<()> {
-        let parsed_set = self.parser.parse_set_string(&self.input_buffer).await?;
+        let parsed_set = self
+            .parser
+            .parse_set_string(&self.input_buffer, &self.known_exercises)
+            .await?;
         let (set, exercise_name) = &self.sets[self.selected];
         let set_id = set.id;
 
@@ -616,7 +632,7 @@ struct App<T: LlmInterface> {
 
 impl<T: LlmInterface> App<T> {
     async fn parse_input(&self, input: &str) -> Result<()> {
-        let parsed_set = self.parser.parse_set_string(input).await?;
+        let parsed_set = self.parser.parse_set_string(input, &[]).await?;
         println!("Parsed set: {:?}", parsed_set);
         Ok(())
     }

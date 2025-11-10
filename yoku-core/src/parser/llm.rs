@@ -3,15 +3,15 @@ use std::sync::Arc;
 // use diesel_async::RunQueryDsl;
 use anyhow::Result;
 use anyhow::anyhow;
-use ollama_rs::generation::parameters::TimeUnit;
 use openai::{Credentials, chat::*};
 use tokio::sync::OnceCell;
 
-use crate::parser::ParsedSet;
+use crate::parser::{ParsedSet, PromptBuilder};
+use ollama_rs::generation::parameters::TimeUnit;
 
 #[allow(async_fn_in_trait)] // TODO: if something weird breaks, maybe this is why
 pub trait LlmInterface {
-    async fn parse_set_string(&self, input: &str) -> Result<ParsedSet>;
+    async fn parse_set_string(&self, input: &str, known_exercises: &[String]) -> Result<ParsedSet>;
     async fn new(model: Option<String>) -> Result<Box<Self>>;
 }
 
@@ -56,26 +56,10 @@ impl LlmInterface for Ollama {
         }))
     }
 
-    async fn parse_set_string(&self, input: &str) -> Result<ParsedSet> {
-        //let client = Self::get_client().await?;
-        let system_prompt = "You are a precise workout set parser. \
-                             Your goal is to extract structured information from short workout log strings. \
-                             Always return a strict JSON object matching this schema: \
-                             {\"exercise\": string, \"weight\": float|null, \"reps\": float|null, \"rpe\": float|null, \"tags\": [string], \"aoi\": string|null, \"original_string\": string}. \
-                             Never include explanations or text outside of the JSON object.";
-
-        let user_prompt = format!(
-            "Parse the following workout log:\n{}\n\n\
-             - 'exercise': the movement name (e.g., bench press, squat, deadlift, pull-ups)\n\
-             - 'weight': numeric load in kilograms or pounds if specified; otherwise null\n\
-             - 'reps': number of repetitions; otherwise null\n\
-             - 'rpe': numeric rate of perceived exertion (1–10) if mentioned, otherwise null\n\
-             - 'tags': any hashtags or key terms (like 'strength', 'hypertrophy', 'warmup') as a list\n\
-             - 'aoi': any other information you feel is pertinent to include that does not fit in another category\n\
-             - 'original_string': the exact input string\n\
-             Return only valid JSON conforming to the schema.",
-            input
-        );
+    async fn parse_set_string(&self, input: &str, known_exercises: &[String]) -> Result<ParsedSet> {
+        let prompt_builder = PromptBuilder::new(known_exercises);
+        let system_prompt = prompt_builder.system_prompt();
+        let user_prompt = prompt_builder.user_prompt(input);
 
         let options = ModelOptions::default().temperature(0.001);
 
@@ -86,7 +70,7 @@ impl LlmInterface for Ollama {
                     .options(options)
                     .system(system_prompt)
                     .keep_alive(KeepAlive::Until {
-                        time: 10,
+                        time: 30,
                         unit: TimeUnit::Minutes,
                     }),
             )
@@ -125,44 +109,28 @@ impl LlmInterface for OpenAi {
         }))
     }
 
-    async fn parse_set_string(&self, input: &str) -> Result<ParsedSet> {
+    async fn parse_set_string(&self, input: &str, known_exercises: &[String]) -> Result<ParsedSet> {
         let creds = Self::get_creds().await?;
+        let prompt_builder = PromptBuilder::new(known_exercises);
+
         let messages = vec![
-        ChatCompletionMessage {
-            role: ChatCompletionMessageRole::System,
-            content: Some(
-            "You are a precise workout set parser. \
-             Your goal is to extract structured information from short workout log strings. \
-             Always return a strict JSON object matching this schema: \
-             {\"exercise\": string, \"weight\": float|null, \"reps\": float|null, \"rpe\": float|null, \"tags\": [string], \"aoi\": string|null, \"original_string\": string}. \
-             Never include explanations or text outside of the JSON object."
-                .to_string(),
-                ),
-            name: None,
-            function_call: None,
-            tool_call_id: None,
-            tool_calls: None
-        },
-        ChatCompletionMessage {
-            role: ChatCompletionMessageRole::User,
-            content: Some(format!(
-            "Parse the following workout log:\n{}\n\n\
-             - 'exercise': the movement name (e.g., bench press, squat, deadlift, pull-ups)\n\
-             - 'weight': numeric load in kilograms or pounds if specified; otherwise null\n\
-             - 'reps': number of repetitions; otherwise null\n\
-             - 'rpe': numeric rate of perceived exertion (1–10) if mentioned, otherwise null\n\
-             - 'tags': any hashtags or key terms (like 'strength', 'hypertrophy', 'warmup') as a list\n\
-             - 'aoi': any other information you feel is pertinent to include that does not fit in another category\n\
-             - 'original_string': the exact input string\n\
-             Return only valid JSON conforming to the schema.",
-            input
-        )),
-            name: None,
-            function_call: None,
-            tool_call_id: None,
-            tool_calls: None
-        }
-    ];
+            ChatCompletionMessage {
+                role: ChatCompletionMessageRole::System,
+                content: Some(prompt_builder.system_prompt()),
+                name: None,
+                function_call: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+            ChatCompletionMessage {
+                role: ChatCompletionMessageRole::User,
+                content: Some(prompt_builder.user_prompt(input)),
+                name: None,
+                function_call: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+        ];
         let result_completion = ChatCompletion::builder(&self.model, messages.clone())
             .response_format(ChatCompletionResponseFormat::json_object())
             .credentials(creds.clone())
