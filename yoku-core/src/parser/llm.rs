@@ -77,7 +77,7 @@ impl LlmInterface for Ollama {
             input
         );
 
-        let options = ModelOptions::default().temperature(0.1).num_ctx(128);
+        let options = ModelOptions::default().temperature(0.001);
 
         let res = self
             .client
