@@ -2,7 +2,7 @@ use anyhow::Result;
 use tokio::sync::Mutex;
 
 use crate::db::operations::{
-    add_set_to_workout, create_workout, get_or_create_exercise, get_workout,
+    add_set_to_workout, create_workout, get_or_create_exercise, get_workout, update_set
 };
 use crate::parser::ParsedSet;
 
@@ -37,6 +37,11 @@ impl Session {
         *self.workout_id.lock().await
     }
 
+    pub async fn replace_set_from_parsed(&self, set_id: i32, parsed: &ParsedSet) -> Result<()> {
+        update_set(set_id, &parsed.to_update_set().await).await?;
+        Ok(())
+    }
+
     pub async fn add_set_from_parsed(&self, parsed: &ParsedSet) -> Result<()> {
         let workout_id = self
             .get_workout_id()
@@ -46,9 +51,8 @@ impl Session {
         // Get or create the exercise
         let exercise = get_or_create_exercise(&parsed.exercise).await?;
 
-        // Convert reps from f32 to i32
-        let reps = parsed.reps.unwrap_or(0.0) as i32;
         let weight = parsed.weight.unwrap_or(0.0);
+        let reps = parsed.reps.unwrap_or(0);
 
         // Add the set to the workout
         add_set_to_workout(&workout_id, &exercise.id, &weight, &reps, parsed.rpe).await?;

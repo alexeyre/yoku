@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use openai::{Credentials, chat::*};
 use tokio::sync::OnceCell;
+use anyhow::anyhow;
 
 use crate::parser::ParsedSet;
 
@@ -15,6 +16,21 @@ pub trait LlmInterface {
 
 use ollama_rs::generation::completion::request::GenerationRequest;
 use ollama_rs::{Ollama as OllamaSdk, models::ModelOptions};
+
+
+
+fn strip_code_fences(s: &str) -> &str {
+    let mut trimmed = s.trim();
+    if let Some(stripped) = trimmed.strip_prefix("```json") {
+        trimmed = stripped;
+    } else if let Some(stripped) = trimmed.strip_prefix("```") {
+        trimmed = stripped;
+    }
+    if let Some(stripped) = trimmed.strip_suffix("```") {
+        trimmed = stripped;
+    }
+    trimmed.trim()
+}
 
 pub struct Ollama {
     client: Arc<OllamaSdk>,
@@ -71,10 +87,12 @@ impl LlmInterface for Ollama {
                     .system(system_prompt),
             )
             .await;
-
-        let parsed = serde_json::from_str(&res?.response.trim())?;
-        let parsed = ParsedSet::with_original(parsed, input.into());
-        Ok(parsed)
+        let res = res?;
+        let response = strip_code_fences(res.response.trim());
+        match serde_json::from_str(response) {
+            Ok(parsed) => Ok(ParsedSet::with_original(parsed, input.into())),
+            Err(e) => Err(anyhow!("Cannot parse LLM output: {}\nGot error: {}", response, e))
+        }
     }
 }
 

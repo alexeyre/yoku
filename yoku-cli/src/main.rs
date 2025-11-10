@@ -6,7 +6,7 @@ use std::fmt;
 use yoku_core::db::models::{DisplayableSet, Set, Workout};
 use yoku_core::db::operations::{
     create_workout, delete_set, delete_workout, get_all_workouts, get_exercise,
-    get_sets_for_workout,
+    get_sets_for_workout, update_set,
 };
 use yoku_core::parser::llm::LlmInterface;
 use yoku_core::session::Session;
@@ -61,7 +61,7 @@ impl WorkoutSelector {
         let status_message = if workouts.is_empty() {
             "No workouts found. Press 'n' to create a new workout, 'q' to quit".to_string()
         } else {
-            "j/k: navigate | n: new workout | r: resume | d: delete | q: quit".to_string()
+            "j/k: navigate | n: new workout | r/enter: resume | d: delete | q: quit".to_string()
         };
 
         Ok(Self {
@@ -256,7 +256,7 @@ async fn run_workout_selector(mut terminal: DefaultTerminal) -> Result<Option<i3
                     KeyCode::Char('d') | KeyCode::Char('D') => {
                         selector.delete_selected().await?;
                     }
-                    KeyCode::Char('r') | KeyCode::Char('R') => {
+                    KeyCode::Enter | KeyCode::Char('r') | KeyCode::Char('R') => {
                         if let Some(workout_id) = selector.get_selected_workout_id() {
                             return Ok(Some(workout_id));
                         }
@@ -271,7 +271,7 @@ async fn run_workout_selector(mut terminal: DefaultTerminal) -> Result<Option<i3
                         selector.input_mode = InputMode::Normal;
                         selector.input_buffer.clear();
                         selector.status_message =
-                            "j/k: navigate | n: new workout | r: resume | d: delete | q: quit"
+                            "j/k: navigate | n: new workout | r/enter: resume | d: delete | q: quit"
                                 .to_string();
                     }
                     KeyCode::Char(c) => {
@@ -301,6 +301,7 @@ struct WorkoutSession<T: LlmInterface> {
 enum SessionInputMode {
     Normal,
     CreatingSet,
+    RenteringSet,
 }
 
 impl<T: LlmInterface> WorkoutSession<T> {
@@ -312,7 +313,7 @@ impl<T: LlmInterface> WorkoutSession<T> {
             workout_id,
             sets: Vec::new(),
             selected: 0,
-            status_message: "c: create set | d: delete | q: quit".to_string(),
+            status_message: "c: create set | d: delete | e: edit | r: renter | q: quit".to_string(),
             input_mode: SessionInputMode::Normal,
             input_buffer: String::new(),
             parser,
@@ -358,6 +359,12 @@ impl<T: LlmInterface> WorkoutSession<T> {
             "Enter set description (e.g., 'bench press 100kg x 5 reps'):".to_string();
     }
 
+    fn enter_rentry_mode(&mut self) {
+        self.input_mode = SessionInputMode::RenteringSet;
+        self.input_buffer.clear();
+        self.status_message = "Enter a set description to replace the existing entry (ESC to cancel): ".to_string();
+    }
+
     async fn create_set(&mut self) -> Result<()> {
         let parsed_set = self.parser.parse_set_string(&self.input_buffer).await?;
         self.session.add_set_from_parsed(&parsed_set).await?;
@@ -365,6 +372,21 @@ impl<T: LlmInterface> WorkoutSession<T> {
         self.input_mode = SessionInputMode::Normal;
         self.input_buffer.clear();
         self.status_message = format!("Added set: {}", parsed_set.exercise);
+
+        self.refresh_sets().await?;
+        Ok(())
+    }
+
+    async fn replace_set(&mut self) -> Result<()> {
+        let parsed_set = self.parser.parse_set_string(&self.input_buffer).await?;
+        let (set, _) = &self.sets[self.selected];
+        let set_id = set.id;
+
+        update_set(set_id, &parsed_set.to_update_set().await).await?;
+
+        self.input_mode = SessionInputMode::Normal;
+        self.input_buffer.clear();
+        self.status_message = format!("Replaced set #{} with {}", 1, 2);
 
         self.refresh_sets().await?;
         Ok(())
@@ -470,6 +492,17 @@ async fn run_workout_session<T: LlmInterface>(
                         );
                     frame.render_widget(input_widget, chunks[1]);
                 }
+
+                SessionInputMode::RenteringSet => {
+                    let input_widget = Paragraph::new(session.input_buffer.as_str())
+                        .style(Style::default().fg(Color::Green))
+                        .block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .title("Replacement Set Description"),
+                        );
+                    frame.render_widget(input_widget, chunks[1]);
+                }
             }
 
             // Footer with status
@@ -497,6 +530,13 @@ async fn run_workout_session<T: LlmInterface>(
                     KeyCode::Char('d') | KeyCode::Char('D') => {
                         session.delete_selected().await?;
                     }
+                    KeyCode::Char('e') | KeyCode::Char('E') => {
+                        
+                    }
+                    KeyCode::Char('r') | KeyCode::Char('R') => {
+                        // re-enter set string
+                        session.enter_rentry_mode();
+                    }
                     _ => {}
                 },
                 SessionInputMode::CreatingSet => match key.code {
@@ -522,6 +562,29 @@ async fn run_workout_session<T: LlmInterface>(
                     }
                     _ => {}
                 },
+
+
+                SessionInputMode::RenteringSet => match key.code {
+                    KeyCode::Enter => {
+                        if let Err(e) = session.replace_set().await {
+                            session.status_message = format!("Error creating set: {}", e);
+                            session.input_mode = SessionInputMode::Normal;
+                            session.input_buffer.clear();
+                        }
+                    }
+                    KeyCode::Esc => {
+                        session.input_mode = SessionInputMode::Normal;
+                        session.input_buffer.clear();
+                        session.status_message = "c: create set | d: delete | q: quit".to_string();
+                    }
+                    KeyCode::Char(c) => {
+                        session.input_buffer.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        session.input_buffer.pop();
+                    }
+                    _ => {}
+                }
             }
         }
     }

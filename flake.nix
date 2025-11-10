@@ -9,6 +9,38 @@
     system = "aarch64-darwin";
     pkgs = import nixpkgs { inherit system; };
   in {
+    packages.${system} = {
+      yoku-cli = pkgs.rustPlatform.buildRustPackage {
+        pname = "yoku-cli";
+        version = "0.1.0";
+
+        src = ./.;
+
+        cargoLock = {
+          lockFile = ./Cargo.lock;
+        };
+
+        nativeBuildInputs = with pkgs; [
+          pkg-config
+        ];
+
+        buildInputs = with pkgs; [
+          openssl
+          postgresql
+        ];
+
+        # Only build the yoku-cli binary
+        cargoBuildFlags = [ "--bin" "yoku-cli" "-p" "yoku-cli" ];
+
+        meta = with pkgs.lib; {
+          description = "Yoku workout tracker CLI";
+          license = licenses.mit;
+        };
+      };
+
+      default = self.packages.${system}.yoku-cli;
+    };
+
     devShells.${system}.default = pkgs.mkShell {
 
       nativeBuildInputs = with pkgs; [
