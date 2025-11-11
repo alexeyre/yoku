@@ -1,71 +1,173 @@
+use chrono::{DateTime, NaiveDate, Utc};
 use diesel::{AsChangeset, Associations, Insertable, Queryable};
 use std::fmt;
+use uuid::Uuid;
 
-use crate::db::schema;
+use crate::db::schema::{
+    exercise_muscles, exercises, muscles, request_strings, users, workout_sessions, workout_sets,
+};
 
-// Exercise models
+// Muscles
 #[derive(Queryable, Debug, Clone)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(table_name = muscles)]
+pub struct Muscle {
+    pub id: Uuid,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = muscles)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewMuscle {
+    pub name: String,
+}
+
+// Exercises
+#[derive(Queryable, Debug, Clone)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(table_name = exercises)]
 pub struct Exercise {
-    pub id: i32,
+    pub id: Uuid,
+    pub slug: String,
     pub name: String,
-    pub equipment: Option<String>,
-    pub primary_muscle: Option<String>,
-    pub secondary_muscle: Option<String>,
     pub description: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Insertable)]
-#[diesel(table_name = schema::exercises)]
-pub struct NewExercise {
-    pub name: String,
-    pub equipment: Option<String>,
-    pub primary_muscle: Option<String>,
-    pub secondary_muscle: Option<String>,
-    pub description: Option<String>,
-}
-
-// Workout models
-#[derive(Queryable, Debug, Clone)]
+#[diesel(table_name = exercises)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct Workout {
-    pub id: i32,
-    pub name: Option<String>,
-    pub performed_at: Option<chrono::NaiveDateTime>,
-    pub notes: Option<String>,
+pub struct NewExercise {
+    pub slug: String,
+    pub name: String,
+    pub description: Option<String>,
 }
 
-#[derive(Insertable)]
-#[diesel(table_name = schema::workouts)]
-pub struct NewWorkout {
-    pub name: Option<String>,
-    pub performed_at: Option<chrono::NaiveDateTime>,
-    pub notes: Option<String>,
-}
-
-// Set models
+// Join table between exercises and muscles
 #[derive(Queryable, Debug, Clone, Associations)]
 #[diesel(belongs_to(Exercise))]
-#[diesel(belongs_to(Workout))]
-#[diesel(table_name = schema::sets)]
+#[diesel(belongs_to(Muscle))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct Set {
-    pub id: i32,
-    pub exercise_id: i32,
-    pub workout_id: i32,
-    pub weight: f32,
-    pub reps: i32,
-    pub rpe: Option<f32>,
-    pub set_number: Option<i32>,
+#[diesel(table_name = exercise_muscles)]
+pub struct ExerciseMuscle {
+    pub exercise_id: Uuid,
+    pub muscle_id: Uuid,
+    pub relation_type: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
-impl fmt::Display for Set {
+#[derive(Insertable)]
+#[diesel(table_name = exercise_muscles)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewExerciseMuscle {
+    pub exercise_id: Uuid,
+    pub muscle_id: Uuid,
+    pub relation_type: String,
+}
+
+// Users
+#[derive(Queryable, Debug, Clone)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(table_name = users)]
+pub struct User {
+    pub id: Uuid,
+    pub username: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = users)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewUser {
+    pub username: String,
+}
+
+// Request strings (raw user input)
+#[derive(Queryable, Debug, Clone, Associations)]
+#[diesel(belongs_to(User))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(table_name = request_strings)]
+pub struct RequestString {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub string: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = request_strings)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewRequestString {
+    pub user_id: Uuid,
+    pub string: String,
+}
+
+// Plans feature removed / deferred.
+// (Kept as a plain comment in Rust to avoid stray SQL-style comments)
+
+// Workout sessions
+// The migration stores `date` as a DATE and `duration_seconds` as an integer.
+// Use `date` for the session date and `duration_seconds` for numeric duration ops.
+#[derive(Queryable, Debug, Clone, Associations)]
+#[diesel(belongs_to(User))]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(table_name = workout_sessions)]
+pub struct WorkoutSession {
+    pub id: Uuid,
+    pub user_id: Option<Uuid>,
+    pub name: Option<String>,
+    pub date: NaiveDate,
+    pub duration_seconds: i32,
+    pub notes: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = workout_sessions)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewWorkoutSession {
+    pub user_id: Option<Uuid>,
+    pub name: Option<String>,
+    pub date: NaiveDate,
+    pub duration_seconds: i32,
+    pub notes: Option<String>,
+}
+
+// Workout sets
+#[derive(Queryable, Debug, Clone, Associations)]
+#[diesel(belongs_to(WorkoutSession, foreign_key = session_id))]
+#[diesel(belongs_to(Exercise))]
+#[diesel(belongs_to(RequestString, foreign_key = request_string_id))]
+#[diesel(table_name = workout_sets)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct WorkoutSet {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub exercise_id: Uuid,
+    pub request_string_id: Uuid,
+    pub weight: f32,
+    pub reps: i32,
+    pub set_index: i32,
+    pub rpe: Option<f32>,
+    pub notes: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl fmt::Display for WorkoutSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let rpe_str = self.rpe.map(|r| format!(" @{:.1}", r)).unwrap_or_default();
-
         write!(
             f,
-            "Exercise #{}: {:.1}lbs x {} reps{}",
+            "Exercise {}: {:.1} x {} reps{}",
             self.exercise_id, self.weight, self.reps, rpe_str
         )
     }
@@ -73,12 +175,12 @@ impl fmt::Display for Set {
 
 // Helper struct for displaying sets with exercise names
 pub struct DisplayableSet {
-    pub set: Set,
+    pub set: WorkoutSet,
     pub exercise_name: String,
 }
 
 impl DisplayableSet {
-    pub fn new(set: Set, exercise_name: String) -> Self {
+    pub fn new(set: WorkoutSet, exercise_name: String) -> Self {
         Self { set, exercise_name }
     }
 }
@@ -91,38 +193,38 @@ impl fmt::Display for DisplayableSet {
             .map(|r| format!(" @{:.1}", r))
             .unwrap_or_default();
 
-        let set_number = self
-            .set
-            .set_number
-            .map(|n| format!("({})", n))
-            .unwrap_or_default();
-
         write!(
             f,
-            "{} {}: {:.1}kg x {} reps{}",
-            self.exercise_name, set_number, self.set.weight, self.set.reps, rpe_str
+            "{} (set #{}): {:.1} x {} reps{}",
+            self.exercise_name, self.set.set_index, self.set.weight, self.set.reps, rpe_str
         )
     }
 }
 
-#[derive(Insertable)]
-#[diesel(table_name = schema::sets)]
-pub struct NewSet {
-    pub exercise_id: i32,
-    pub workout_id: i32,
+#[derive(Insertable, Clone)]
+#[diesel(table_name = workout_sets)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewWorkoutSet {
+    pub session_id: Uuid,
+    pub exercise_id: Uuid,
+    pub request_string_id: Uuid,
     pub weight: f32,
     pub reps: i32,
+    pub set_index: i32,
     pub rpe: Option<f32>,
-    pub set_number: Option<i32>,
+    pub notes: Option<String>,
 }
 
 #[derive(AsChangeset, Debug)]
-#[diesel(table_name = schema::sets)]
-pub struct UpdateSet {
-    pub exercise_id: Option<i32>,
-    pub workout_id: Option<i32>,
+#[diesel(table_name = workout_sets)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct UpdateWorkoutSet {
+    pub session_id: Option<Uuid>,
+    pub exercise_id: Option<Uuid>,
+    pub request_string_id: Option<Uuid>,
     pub weight: Option<f32>,
     pub reps: Option<i32>,
-    pub rpe: Option<Option<f32>>,
-    pub set_number: Option<Option<i32>>,
+    pub rpe: Option<f32>,
+    pub set_index: Option<i32>,
+    pub notes: Option<String>,
 }

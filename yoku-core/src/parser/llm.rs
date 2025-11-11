@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 // use diesel_async::RunQueryDsl;
@@ -6,13 +8,21 @@ use anyhow::anyhow;
 use openai::{Credentials, chat::*};
 use tokio::sync::OnceCell;
 
+/// A small BoxFuture alias so trait methods can return boxed futures and be object-safe.
+type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
 use crate::parser::{ParsedSet, PromptBuilder};
 use ollama_rs::generation::parameters::TimeUnit;
 
-#[allow(async_fn_in_trait)] // TODO: if something weird breaks, maybe this is why
-pub trait LlmInterface {
-    async fn parse_set_string(&self, input: &str, known_exercises: &[String]) -> Result<ParsedSet>;
-    async fn new(model: Option<String>) -> Result<Box<Self>>;
+/// Object-safe LLM interface. Implementations return boxed futures so that
+/// `Box<dyn LlmInterface>` is usable.
+pub trait LlmInterface: Send + Sync {
+    /// Parse an input set string. Returns a boxed future tied to the borrow lifetime.
+    fn parse_set_string<'a>(
+        &'a self,
+        input: &'a str,
+        known_exercises: &'a [String],
+    ) -> BoxFuture<'a, Result<ParsedSet>>;
 }
 
 use ollama_rs::generation::completion::request::GenerationRequest;
@@ -47,44 +57,51 @@ impl Ollama {
             .await
             .clone())
     }
-}
-impl LlmInterface for Ollama {
-    async fn new(model: Option<String>) -> Result<Box<Self>> {
+
+    /// Public constructor returning a boxed trait object.
+    pub async fn new(model: Option<String>) -> Result<Box<dyn LlmInterface + Send + Sync>> {
         Ok(Box::new(Self {
             client: Self::get_client().await?,
             model: model.unwrap_or_else(|| OLLAMA_DEFAULT_MODEL.to_string()),
         }))
     }
+}
+impl LlmInterface for Ollama {
+    fn parse_set_string<'a>(
+        &'a self,
+        input: &'a str,
+        known_exercises: &'a [String],
+    ) -> BoxFuture<'a, Result<ParsedSet>> {
+        Box::pin(async move {
+            let prompt_builder = PromptBuilder::new(known_exercises);
+            let system_prompt = prompt_builder.system_prompt();
+            let user_prompt = prompt_builder.user_prompt(input);
 
-    async fn parse_set_string(&self, input: &str, known_exercises: &[String]) -> Result<ParsedSet> {
-        let prompt_builder = PromptBuilder::new(known_exercises);
-        let system_prompt = prompt_builder.system_prompt();
-        let user_prompt = prompt_builder.user_prompt(input);
+            let options = ModelOptions::default().temperature(0.001);
 
-        let options = ModelOptions::default().temperature(0.001);
-
-        let res = self
-            .client
-            .generate(
-                GenerationRequest::new(self.model.clone(), user_prompt)
-                    .options(options)
-                    .system(system_prompt)
-                    .keep_alive(KeepAlive::Until {
-                        time: 30,
-                        unit: TimeUnit::Minutes,
-                    }),
-            )
-            .await;
-        let res = res?;
-        let response = strip_code_fences(res.response.trim());
-        match serde_json::from_str(response) {
-            Ok(parsed) => Ok(ParsedSet::with_original(parsed, input.into())),
-            Err(e) => Err(anyhow!(
-                "Cannot parse LLM output: {}\nGot error: {}",
-                response,
-                e
-            )),
-        }
+            let res = self
+                .client
+                .generate(
+                    GenerationRequest::new(self.model.clone(), user_prompt)
+                        .options(options)
+                        .system(system_prompt)
+                        .keep_alive(KeepAlive::Until {
+                            time: 30,
+                            unit: TimeUnit::Minutes,
+                        }),
+                )
+                .await;
+            let res = res?;
+            let response = strip_code_fences(res.response.trim());
+            match serde_json::from_str(response) {
+                Ok(parsed) => Ok(ParsedSet::with_original(parsed, input.into())),
+                Err(e) => Err(anyhow!(
+                    "Cannot parse LLM output: {}\nGot error: {}",
+                    response,
+                    e
+                )),
+            }
+        })
     }
 }
 
@@ -101,44 +118,51 @@ impl OpenAi {
             .await
             .clone())
     }
-}
-impl LlmInterface for OpenAi {
-    async fn new(model: Option<String>) -> Result<Box<Self>> {
+
+    /// Public constructor returning a boxed trait object.
+    pub async fn new(model: Option<String>) -> Result<Box<dyn LlmInterface + Send + Sync>> {
         Ok(Box::new(Self {
             model: model.unwrap_or_else(|| OPENAI_DEFAULT_MODEL.to_string()),
         }))
     }
+}
+impl LlmInterface for OpenAi {
+    fn parse_set_string<'a>(
+        &'a self,
+        input: &'a str,
+        known_exercises: &'a [String],
+    ) -> BoxFuture<'a, Result<ParsedSet>> {
+        Box::pin(async move {
+            let creds = Self::get_creds().await?;
+            let prompt_builder = PromptBuilder::new(known_exercises);
 
-    async fn parse_set_string(&self, input: &str, known_exercises: &[String]) -> Result<ParsedSet> {
-        let creds = Self::get_creds().await?;
-        let prompt_builder = PromptBuilder::new(known_exercises);
-
-        let messages = vec![
-            ChatCompletionMessage {
-                role: ChatCompletionMessageRole::System,
-                content: Some(prompt_builder.system_prompt()),
-                name: None,
-                function_call: None,
-                tool_call_id: None,
-                tool_calls: None,
-            },
-            ChatCompletionMessage {
-                role: ChatCompletionMessageRole::User,
-                content: Some(prompt_builder.user_prompt(input)),
-                name: None,
-                function_call: None,
-                tool_call_id: None,
-                tool_calls: None,
-            },
-        ];
-        let result_completion = ChatCompletion::builder(&self.model, messages.clone())
-            .response_format(ChatCompletionResponseFormat::json_object())
-            .credentials(creds.clone())
-            //.temperature(0.1)
-            .create()
-            .await?;
-        let result_message = result_completion.choices.first().unwrap().message.clone();
-        let parsed: ParsedSet = serde_json::from_str(&result_message.content.unwrap().trim())?;
-        Ok(parsed)
+            let messages = vec![
+                ChatCompletionMessage {
+                    role: ChatCompletionMessageRole::System,
+                    content: Some(prompt_builder.system_prompt()),
+                    name: None,
+                    function_call: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                },
+                ChatCompletionMessage {
+                    role: ChatCompletionMessageRole::User,
+                    content: Some(prompt_builder.user_prompt(input)),
+                    name: None,
+                    function_call: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                },
+            ];
+            let result_completion = ChatCompletion::builder(&self.model, messages.clone())
+                .response_format(ChatCompletionResponseFormat::json_object())
+                .credentials(creds.clone())
+                //.temperature(0.1)
+                .create()
+                .await?;
+            let result_message = result_completion.choices.first().unwrap().message.clone();
+            let parsed: ParsedSet = serde_json::from_str(&result_message.content.unwrap().trim())?;
+            Ok(parsed)
+        })
     }
 }

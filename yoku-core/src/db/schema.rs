@@ -1,72 +1,97 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    exercise_muscles (exercise_id, muscle_id) {
+        exercise_id -> Uuid,
+        muscle_id -> Uuid,
+        relation_type -> Text,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     exercises (id) {
-        id -> Int4,
+        id -> Uuid,
+        slug -> Text,
         name -> Text,
-        equipment -> Nullable<Text>,
-        primary_muscle -> Nullable<Text>,
-        secondary_muscle -> Nullable<Text>,
         description -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
     }
 }
 
 diesel::table! {
-    exercisetags (id) {
-        id -> Int4,
-        exercise_id -> Int4,
-        tag_id -> Int4,
+    muscles (id) {
+        id -> Uuid,
+        name -> Text,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
     }
 }
 
 diesel::table! {
-    sets (id) {
-        id -> Int4,
-        exercise_id -> Int4,
-        workout_id -> Int4,
+    request_strings (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        string -> Text,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    users (id) {
+        id -> Uuid,
+        username -> Text,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    workout_sessions (id) {
+        id -> Uuid,
+        user_id -> Nullable<Uuid>,
+        name -> Nullable<Text>,
+        date -> Date,
+        duration_seconds -> Int4,
+        notes -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    workout_sets (id) {
+        id -> Uuid,
+        session_id -> Uuid,
+        exercise_id -> Uuid,
+        request_string_id -> Uuid,
         weight -> Float4,
         reps -> Int4,
+        set_index -> Int4,
         rpe -> Nullable<Float4>,
-        set_number -> Nullable<Int4>,
-    }
-}
-
-diesel::table! {
-    settags (id) {
-        id -> Int4,
-        set_id -> Int4,
-        tag_id -> Int4,
-    }
-}
-
-diesel::table! {
-    tags (id) {
-        id -> Int4,
-        name -> Text,
-    }
-}
-
-diesel::table! {
-    workouts (id) {
-        id -> Int4,
-        name -> Nullable<Text>,
-        performed_at -> Nullable<Timestamp>,
         notes -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
     }
 }
 
-diesel::joinable!(exercisetags -> exercises (exercise_id));
-diesel::joinable!(exercisetags -> tags (tag_id));
-diesel::joinable!(sets -> exercises (exercise_id));
-diesel::joinable!(sets -> workouts (workout_id));
-diesel::joinable!(settags -> sets (set_id));
-diesel::joinable!(settags -> tags (tag_id));
+diesel::joinable!(exercise_muscles -> exercises (exercise_id));
+diesel::joinable!(exercise_muscles -> muscles (muscle_id));
+diesel::joinable!(request_strings -> users (user_id));
+diesel::joinable!(workout_sessions -> users (user_id));
+diesel::joinable!(workout_sets -> exercises (exercise_id));
+diesel::joinable!(workout_sets -> request_strings (request_string_id));
+diesel::joinable!(workout_sets -> workout_sessions (session_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    exercise_muscles,
     exercises,
-    exercisetags,
-    sets,
-    settags,
-    tags,
-    workouts,
+    muscles,
+    request_strings,
+    users,
+    workout_sessions,
+    workout_sets,
 );
