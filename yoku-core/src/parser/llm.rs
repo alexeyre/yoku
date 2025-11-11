@@ -134,7 +134,7 @@ impl LlmInterface for OpenAi {
         let result_completion = ChatCompletion::builder(&self.model, messages.clone())
             .response_format(ChatCompletionResponseFormat::json_object())
             .credentials(creds.clone())
-            .temperature(0.1)
+            //.temperature(0.1)
             .create()
             .await?;
         let result_message = result_completion.choices.first().unwrap().message.clone();

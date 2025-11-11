@@ -91,10 +91,16 @@ impl fmt::Display for DisplayableSet {
             .map(|r| format!(" @{:.1}", r))
             .unwrap_or_default();
 
+        let set_number = self
+            .set
+            .set_number
+            .map(|n| format!("({})", n))
+            .unwrap_or_default();
+
         write!(
             f,
-            "{}: {:.1}kg x {} reps{}",
-            self.exercise_name, self.set.weight, self.set.reps, rpe_str
+            "{} {}: {:.1}kg x {} reps{}",
+            self.exercise_name, set_number, self.set.weight, self.set.reps, rpe_str
         )
     }
 }

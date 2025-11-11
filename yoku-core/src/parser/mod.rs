@@ -19,8 +19,8 @@ impl PromptBuilder {
         "You are a precise workout set parser. \
          Your goal is to extract structured information from short workout log strings. \
          Always return a strict JSON object matching this schema: \
-         {\"exercise\": string, \"weight\": float|null, \"reps\": integer|null, \"rpe\": float|null, \"tags\": [string], \"aoi\": string|null, \"original_string\": string}. \
-         CRITICAL: 'reps' must be an integer (5, not 5.0). \
+         {\"exercise\": string, \"weight\": float|null, \"reps\": integer|null, \"rpe\": float|null, \"set_count\": integer|null, \"tags\": [string], \"aoi\": string|null, \"original_string\": string}. \
+         CRITICAL: 'reps' and 'set_count' must be integers (5, not 5.0). \
          Never include explanations or text outside of the JSON object.".to_string()
     }
 
@@ -58,10 +58,11 @@ impl PromptBuilder {
              - 'weight': numeric load in kilograms or pounds if specified; otherwise null\n\
              - 'reps': INTEGER number of repetitions (e.g., 5, 8, 12, NOT 5.0); otherwise null\n\
              - 'rpe': Rate of Perceived Exertion (1-10 scale, can be decimal like 8.5). Use the RPE scale above to interpret user descriptions\n\
+             - 'set_count': INTEGER number of sets if mentioned (e.g., '5 sets of 5 reps' -> set_count: 5, reps: 5); otherwise null or 1\n\
              - 'tags': any hashtags or key terms (like 'strength', 'hypertrophy', 'warmup') as a list\n\
              - 'aoi': any other information you feel is pertinent to include that does not fit in another category\n\
              - 'original_string': the exact input string\n\
-             IMPORTANT: 'reps' must be an integer (5, not 5.0). 'weight' and 'rpe' can be floats.\n\
+             IMPORTANT: 'reps' and 'set_count' must be integers (5, not 5.0). 'weight' and 'rpe' can be floats.\n\
              Return only valid JSON conforming to the schema.",
             input, known_exercises_section, rpe_scale
         )
@@ -102,6 +103,8 @@ pub struct ParsedSet {
     #[serde(deserialize_with = "deserialize_reps")]
     pub reps: Option<i32>,
     pub rpe: Option<f32>,
+    #[serde(deserialize_with = "deserialize_reps")]
+    pub set_count: Option<i32>,
     pub tags: Vec<String>,
     pub aoi: Option<String>,
     #[serde(skip_deserializing)]
@@ -126,6 +129,7 @@ mod tests {
             "weight": 100.0,
             "reps": 5,
             "rpe": 8.0,
+            "set_count": null,
             "tags": [],
             "aoi": null
         }"#;
@@ -142,6 +146,7 @@ mod tests {
             "weight": 100.0,
             "reps": 5.0,
             "rpe": 8.0,
+            "set_count": null,
             "tags": [],
             "aoi": null
         }"#;
@@ -157,6 +162,7 @@ mod tests {
             "weight": 100.0,
             "reps": 5.7,
             "rpe": 8.0,
+            "set_count": null,
             "tags": [],
             "aoi": null
         }"#;
@@ -172,6 +178,7 @@ mod tests {
             "weight": null,
             "reps": null,
             "rpe": 8.0,
+            "set_count": null,
             "tags": [],
             "aoi": "held for 60 seconds"
         }"#;
@@ -187,11 +194,29 @@ mod tests {
             "weight": 100.0,
             "reps": -5,
             "rpe": 8.0,
+            "set_count": null,
             "tags": [],
             "aoi": null
         }"#;
 
         let result: Result<ParsedSet, _> = serde_json::from_str(json);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_deserialize_multiple_sets() {
+        let json = r#"{
+            "exercise": "bench press",
+            "weight": 100.0,
+            "reps": 5,
+            "rpe": 8.0,
+            "set_count": 5,
+            "tags": [],
+            "aoi": null
+        }"#;
+
+        let parsed: ParsedSet = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.set_count, Some(5));
+        assert_eq!(parsed.reps, Some(5));
     }
 }

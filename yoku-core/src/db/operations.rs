@@ -99,6 +99,19 @@ pub async fn add_set_to_workout(
     rpe: Option<f32>,
 ) -> Result<Set> {
     let mut conn = get_conn().await;
+
+    // Get the next set number for this exercise in this workout
+    let max_set_number: Option<i32> = sets::table
+        .filter(sets::workout_id.eq(workout_id))
+        .filter(sets::exercise_id.eq(exercise_id))
+        .select(diesel::dsl::max(sets::set_number))
+        .first(&mut conn)
+        .await
+        .ok()
+        .flatten();
+
+    let next_set_number = max_set_number.map(|n| n + 1).unwrap_or(1);
+
     diesel::insert_into(sets::table)
         .values(&NewSet {
             workout_id: *workout_id,
@@ -106,9 +119,52 @@ pub async fn add_set_to_workout(
             weight: *weight,
             reps: *reps,
             rpe,
-            set_number: None,
+            set_number: Some(next_set_number),
         })
         .get_result::<Set>(&mut conn)
+        .await
+        .map_err(Into::into)
+}
+
+/// Add multiple sets at once for an exercise in a workout
+/// This is useful when a user logs "5 sets of 5 reps at 100kg"
+pub async fn add_multiple_sets_to_workout(
+    workout_id: &i32,
+    exercise_id: &i32,
+    weight: &f32,
+    reps: &i32,
+    rpe: Option<f32>,
+    set_count: i32,
+) -> Result<Vec<Set>> {
+    let mut conn = get_conn().await;
+
+    // Get the current max set number for this exercise in this workout
+    let max_set_number: Option<i32> = sets::table
+        .filter(sets::workout_id.eq(workout_id))
+        .filter(sets::exercise_id.eq(exercise_id))
+        .select(diesel::dsl::max(sets::set_number))
+        .first(&mut conn)
+        .await
+        .ok()
+        .flatten();
+
+    let starting_set_number = max_set_number.map(|n| n + 1).unwrap_or(1);
+
+    // Create all the sets
+    let new_sets: Vec<NewSet> = (0..set_count)
+        .map(|i| NewSet {
+            workout_id: *workout_id,
+            exercise_id: *exercise_id,
+            weight: *weight,
+            reps: *reps,
+            rpe,
+            set_number: Some(starting_set_number + i),
+        })
+        .collect();
+
+    diesel::insert_into(sets::table)
+        .values(&new_sets)
+        .get_results::<Set>(&mut conn)
         .await
         .map_err(Into::into)
 }

@@ -2,7 +2,8 @@ use anyhow::Result;
 use tokio::sync::Mutex;
 
 use crate::db::operations::{
-    add_set_to_workout, create_workout, get_or_create_exercise, get_workout, update_set_from_parsed,
+    add_multiple_sets_to_workout, add_set_to_workout, create_workout, get_or_create_exercise,
+    get_workout, update_set_from_parsed,
 };
 use crate::parser::ParsedSet;
 
@@ -53,9 +54,23 @@ impl Session {
 
         let weight = parsed.weight.unwrap_or(0.0);
         let reps = parsed.reps.unwrap_or(0);
+        let set_count = parsed.set_count.unwrap_or(1).max(1); // Default to 1 set, minimum 1
 
-        // Add the set to the workout
-        add_set_to_workout(&workout_id, &exercise.id, &weight, &reps, parsed.rpe).await?;
+        // Add multiple sets if set_count > 1
+        if set_count > 1 {
+            add_multiple_sets_to_workout(
+                &workout_id,
+                &exercise.id,
+                &weight,
+                &reps,
+                parsed.rpe,
+                set_count,
+            )
+            .await?;
+        } else {
+            // Add a single set
+            add_set_to_workout(&workout_id, &exercise.id, &weight, &reps, parsed.rpe).await?;
+        }
 
         Ok(())
     }
