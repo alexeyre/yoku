@@ -109,12 +109,6 @@ pub struct NewRequestString {
     pub string: String,
 }
 
-// Plans feature removed / deferred.
-// (Kept as a plain comment in Rust to avoid stray SQL-style comments)
-
-// Workout sessions
-// The migration stores `date` as a DATE and `duration_seconds` as an integer.
-// Use `date` for the session date and `duration_seconds` for numeric duration ops.
 #[derive(Queryable, Debug, Clone, Associations)]
 #[diesel(belongs_to(User))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
