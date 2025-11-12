@@ -3,7 +3,21 @@ name: Build
 on:
   push:
     branches: [ master ]
+    paths:
+      - 'yoku-core/**'
+      - 'yoku-cli/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'flake.nix'
+      - 'flake.lock'
   pull_request:
+    paths:
+      - 'yoku-core/**'
+      - 'yoku-cli/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'flake.nix'
+      - 'flake.lock'
 
 jobs:
   build:
