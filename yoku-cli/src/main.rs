@@ -23,44 +23,37 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// Parser backend to use for parsing freeform set strings
     #[arg(short, long, value_enum, default_value_t = ParserType::Ollama)]
     parser: ParserType,
 
-    /// Model name to pass to the selected LLM backend (optional)
     #[arg(short, long)]
     model: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// List all workout sessions
+    
     List {},
 
-    /// Create a new workout session (optionally provide a name)
     Create {
         #[arg(short, long)]
         name: Option<String>,
     },
 
-    /// Delete a workout session by UUID
     Delete {
         id: String,
     },
 
-    /// List all sets in a session
     ListSets {
         session_id: String,
     },
 
-    /// Add a parsed set to a session (we use the LLM parser)
     AddSet {
         session_id: String,
         #[arg(value_parser)]
         input: String,
     },
 
-    /// Delete a set by UUID
     DeleteSet {
         set_id: String,
     },
@@ -69,9 +62,8 @@ enum Commands {
         name: String,
     },
 
-    /// Dump a textual view of the graph (for debugging)
     DumpGraph {
-        /// Max number of relationships to print
+        
         #[arg(short, long, default_value_t = 50)]
         limit: i64,
     },

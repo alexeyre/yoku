@@ -51,22 +51,16 @@ impl Session {
             .await
             .ok_or_else(|| anyhow::anyhow!("No active workout in session"))?;
 
-        // Get or create the exercise
         let exercise = get_or_create_exercise(&parsed.exercise).await?;
 
         let weight = parsed.weight.unwrap_or(0.0);
         let reps = parsed.reps.unwrap_or(0);
-        let set_count = parsed.set_count.unwrap_or(1).max(1); // Default to 1 set, minimum 1
+        let set_count = parsed.set_count.unwrap_or(1).max(1); 
 
-        // The DB requires a `request_string_id` for each workout set.
-        // Create a `request_strings` row for this parsed set so we maintain
-        // a real reference and can inspect the original user input later.
-        // We use a CLI/system username here; you can adapt this to use a
-        // real authenticated user when available.
         let request_str_content = if !parsed.original_string.is_empty() {
             parsed.original_string.clone()
         } else {
-            // Fallback brief summary if the parser didn't set original_string.
+            
             format!(
                 "{} {} reps rpe:{:?}",
                 parsed.exercise,
@@ -77,7 +71,6 @@ impl Session {
         let req = create_request_string_for_username("cli", request_str_content).await?;
         let request_string_id = req.id;
 
-        // Add multiple sets if set_count > 1
         if set_count > 1 {
             add_multiple_sets_to_workout(
                 &session_id,
@@ -90,7 +83,7 @@ impl Session {
             )
             .await?;
         } else {
-            // Add a single set
+            
             add_workout_set(
                 &session_id,
                 &exercise.id,

@@ -15,13 +15,12 @@ pub struct GraphManager {
 static GRAPH_CLIENT: OnceCell<Arc<Graph>> = OnceCell::const_new();
 
 impl GraphManager {
-    /// Connect to the Neo4j instance using env vars and return a manager.
+    
     pub async fn connect() -> Result<Self> {
         let graph = GraphManager::get_graph().await?;
         Ok(Self { graph })
     }
 
-    /// Internal helper: initialize a shared neo4j client once.
     async fn get_graph() -> Result<Arc<Graph>> {
         let arc_ref = GRAPH_CLIENT
             .get_or_try_init(|| async {
@@ -38,7 +37,6 @@ impl GraphManager {
         Ok(arc_ref.clone())
     }
 
-    /// Upsert a muscle node. Uses `name` as the unique key.
     pub async fn upsert_muscle(&self, muscle: &Muscle) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         let q = query(
@@ -51,12 +49,11 @@ impl GraphManager {
         .param("now", now);
 
         let mut result = self.graph.execute(q).await?;
-        // consume result once to ensure query finishes
+        
         while let Ok(Some(_row)) = result.next().await {}
         Ok(())
     }
 
-    /// Upsert an exercise node. Uses `slug` as the unique key and stores some basic properties.
     pub async fn upsert_exercise(&self, exercise: &Exercise) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         let description = exercise.description.clone().unwrap_or_default();
@@ -76,8 +73,6 @@ impl GraphManager {
         Ok(())
     }
 
-    /// Create/refresh a relationship between an exercise and a muscle.
-    /// `relation_type` is a free-form string stored on the relationship (e.g., "primary", "secondary").
     pub async fn upsert_exercise_muscle(
         &self,
         exercise: &Exercise,
@@ -85,7 +80,7 @@ impl GraphManager {
         relation_type: &str,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        // Ensure nodes exist (idempotent MERGE), then MERGE the relationship with properties.
+        
         let q = query(
             "MERGE (e:Exercise { slug: $slug }) \
              ON CREATE SET e.name = $ename, e.created_at = $now, e.updated_at = $now \
@@ -109,8 +104,6 @@ impl GraphManager {
         Ok(())
     }
 
-    /// Upsert an equipment node and create a relation from exercise -> equipment.
-    /// Equipment is only in the graph; it's identified by name.
     pub async fn upsert_equipment_and_link(
         &self,
         exercise: &Exercise,
@@ -141,8 +134,6 @@ impl GraphManager {
         Ok(())
     }
 
-    /// Upsert a variation relationship between two exercises.
-    /// `overlap` should be 0.0..1.0; `relation_type` e.g. "minor", "major", "alternative".
     pub async fn upsert_variation(
         &self,
         exercise: &Exercise,
@@ -173,10 +164,9 @@ impl GraphManager {
         while let Ok(Some(_row)) = result.next().await {}
         Ok(())
     }
-    /// Dump a simple textual representation of the graph for debugging.
-    /// This fetches exercises and their WORKS_MUSCLE relationships and prints them.
+    
     pub async fn dump_graph(&self, limit: i64) -> Result<()> {
-        // Query exercises and linked muscles (limit controls number of rows returned)
+        
         let q_exercise_muscles = query(
             "MATCH (e:Exercise)-[r:WORKS_MUSCLE]->(m:Muscle) \
              RETURN e.slug AS slug, e.name AS name, r.relation_type AS relation_type, m.name AS muscle \
@@ -195,7 +185,7 @@ impl GraphManager {
         let mut result_exercise_equipment = self.graph.execute(q_exercise_equipment).await?;
 
         while let Ok(Some(row)) = result_exercise_muscles.next().await {
-            // row.get returns Option<T> where T implements FromValue
+            
             let slug: String = row.get("slug").unwrap_or_default();
             let name: String = row.get("name").unwrap_or_default();
             let relation_type: String = row.get("relation_type").unwrap_or_default();
@@ -207,7 +197,7 @@ impl GraphManager {
         }
 
         while let Ok(Some(row)) = result_exercise_equipment.next().await {
-            // row.get returns Option<T> where T implements FromValue
+            
             let slug: String = row.get("slug").unwrap_or_default();
             let name: String = row.get("name").unwrap_or_default();
             let relation_type: String = row.get("relation_type").unwrap_or_default();

@@ -7,7 +7,6 @@ use crate::db::schema::{
     exercise_muscles, exercises, muscles, request_strings, users, workout_sessions, workout_sets,
 };
 
-// Muscles
 #[derive(Queryable, Debug, Clone)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(table_name = muscles)]
@@ -25,7 +24,6 @@ pub struct NewMuscle {
     pub name: String,
 }
 
-// Exercises
 #[derive(Queryable, Debug, Clone)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(table_name = exercises)]
@@ -47,7 +45,6 @@ pub struct NewExercise {
     pub description: Option<String>,
 }
 
-// Join table between exercises and muscles
 #[derive(Queryable, Debug, Clone, Associations)]
 #[diesel(belongs_to(Exercise))]
 #[diesel(belongs_to(Muscle))]
@@ -70,7 +67,6 @@ pub struct NewExerciseMuscle {
     pub relation_type: String,
 }
 
-// Users
 #[derive(Queryable, Debug, Clone)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(table_name = users)]
@@ -88,7 +84,6 @@ pub struct NewUser {
     pub username: String,
 }
 
-// Request strings (raw user input)
 #[derive(Queryable, Debug, Clone, Associations)]
 #[diesel(belongs_to(User))]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -135,7 +130,6 @@ pub struct NewWorkoutSession {
     pub notes: Option<String>,
 }
 
-// Workout sets
 #[derive(Queryable, Debug, Clone, Associations)]
 #[diesel(belongs_to(WorkoutSession, foreign_key = session_id))]
 #[diesel(belongs_to(Exercise))]
