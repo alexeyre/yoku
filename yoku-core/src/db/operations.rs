@@ -17,7 +17,7 @@ use crate::{
         RequestString, UpdateWorkoutSet, User, WorkoutSession, WorkoutSet,
     },
     db::schema::{exercises, request_strings, workout_sessions, workout_sets},
-    parser::ParsedSet,
+    llm::ParsedSet,
 };
 
 /// Helper: simple slugify for exercises (lowercase, spaces -> '-', remove disallowed chars)

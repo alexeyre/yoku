@@ -151,7 +151,6 @@ impl GraphManager {
         relation_type: &str,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        // We MERGE both exercises (variant may not exist yet; create lightweight placeholder)
         let q = query(
             "MERGE (a:Exercise { slug: $slug }) \
              ON CREATE SET a.created_at = $now, a.updated_at = $now \
@@ -174,187 +173,28 @@ impl GraphManager {
         while let Ok(Some(_row)) = result.next().await {}
         Ok(())
     }
-
-    /// Seed the graph with a small set of exercises/muscles/equipment for testing.
-    ///
-    /// This is idempotent: it uses MERGE for all nodes/relationships so it can be
-    /// safely re-run during development.
-    pub async fn seed_defaults(&self) -> Result<()> {
-        // Hard-coded seed data that's useful for initial testing.
-        // We create a few muscles, exercises, and equipment, and link them.
-        let now = Utc::now().to_rfc3339();
-
-        // Create muscles
-        let muscles = vec![
-            "lateral_deltoid",
-            "anterior_deltoid",
-            "triceps",
-            "pectoralis_major",
-        ];
-        for m in muscles {
-            let q = query(
-                "MERGE (mm:Muscle { name: $name }) \
-                 ON CREATE SET mm.created_at = $now, mm.updated_at = $now \
-                 ON MATCH SET mm.updated_at = $now RETURN mm.name AS name",
-            )
-            .param("name", m.to_string())
-            .param("now", now.clone());
-            let mut res = self.graph.execute(q).await?;
-            while let Ok(Some(_)) = res.next().await {}
-        }
-
-        // Create equipment
-        let equipments = vec!["dumbbell", "barbell", "cable_machine", "bench"];
-        for eq in equipments {
-            let q = query(
-                "MERGE (e:Equipment { name: $name }) \
-                 ON CREATE SET e.created_at = $now, e.updated_at = $now \
-                 ON MATCH SET e.updated_at = $now RETURN e.name AS name",
-            )
-            .param("name", eq.to_string())
-            .param("now", now.clone());
-            let mut res = self.graph.execute(q).await?;
-            while let Ok(Some(_)) = res.next().await {}
-        }
-
-        // Create a few exercises (slug, name, description)
-        let exercises = vec![
-            (
-                "bench-press",
-                "Bench Press",
-                "Barbell bench press - pressing movement primarily for chest",
-            ),
-            (
-                "incline-bench-press",
-                "Incline Bench Press",
-                "Incline bench press - upper chest emphasis",
-            ),
-            (
-                "dumbbell-lateral-raise",
-                "Dumbbell Lateral Raise",
-                "Shoulder abduction targeting lateral deltoid",
-            ),
-            (
-                "cable-lateral-raise",
-                "Cable Lateral Raise",
-                "Standing cable lateral raise with constant tension",
-            ),
-            (
-                "cable-tricep-extension",
-                "Cable Tricep Extension",
-                "Cable-based triceps extension",
-            ),
-        ];
-
-        for (slug, name, desc) in exercises {
-            let q = query(
-                "MERGE (ex:Exercise { slug: $slug }) \
-                 ON CREATE SET ex.name = $name, ex.description = $desc, ex.created_at = $now, ex.updated_at = $now \
-                 ON MATCH SET ex.name = $name, ex.description = $desc, ex.updated_at = $now RETURN ex.slug AS slug",
-            )
-            .param("slug", slug.to_string())
-            .param("name", name.to_string())
-            .param("desc", desc.to_string())
-            .param("now", now.clone());
-            let mut res = self.graph.execute(q).await?;
-            while let Ok(Some(_)) = res.next().await {}
-        }
-
-        // Link exercises -> muscles (simple relation_type strings for now)
-        let mappings = vec![
-            ("dumbbell-lateral-raise", "lateral_deltoid", "primary"),
-            ("cable-lateral-raise", "lateral_deltoid", "primary"),
-            ("bench-press", "pectoralis_major", "primary"),
-            ("bench-press", "triceps", "secondary"),
-            ("incline-bench-press", "pectoralis_major", "primary"),
-            ("incline-bench-press", "anterior_deltoid", "secondary"),
-            ("cable-tricep-extension", "triceps", "primary"),
-        ];
-
-        for (ex_slug, muscle_name, rel) in mappings {
-            let q = query(
-                "MATCH (ex:Exercise { slug: $slug }), (m:Muscle { name: $mname }) \
-                 MERGE (ex)-[r:WORKS_MUSCLE]->(m) \
-                 ON CREATE SET r.relation_type = $rel, r.created_at = $now, r.updated_at = $now \
-                 ON MATCH SET r.relation_type = $rel, r.updated_at = $now RETURN ex.slug AS slug, m.name AS muscle",
-            )
-            .param("slug", ex_slug.to_string())
-            .param("mname", muscle_name.to_string())
-            .param("rel", rel.to_string())
-            .param("now", now.clone());
-            let mut res = self.graph.execute(q).await?;
-            while let Ok(Some(_)) = res.next().await {}
-        }
-
-        // Link exercises -> equipment
-        let ex_eq = vec![
-            ("dumbbell-lateral-raise", "dumbbell", 1.0_f32),
-            ("cable-lateral-raise", "cable_machine", 1.0_f32),
-            ("bench-press", "barbell", 1.0_f32),
-            ("bench-press", "bench", 1.0_f32),
-            ("incline-bench-press", "barbell", 0.9_f32),
-            ("cable-tricep-extension", "cable_machine", 1.0_f32),
-        ];
-
-        for (ex_slug, eq_name, conf) in ex_eq {
-            let q = query(
-                "MATCH (ex:Exercise { slug: $slug }), (eq:Equipment { name: $eqname }) \
-                 MERGE (ex)-[r:USES_EQUIPMENT]->(eq) \
-                 ON CREATE SET r.confidence = $conf, r.created_at = $now, r.updated_at = $now \
-                 ON MATCH SET r.confidence = $conf, r.updated_at = $now RETURN ex.slug AS slug, eq.name AS equipment",
-            )
-            .param("slug", ex_slug.to_string())
-            .param("eqname", eq_name.to_string())
-            .param("conf", conf)
-            .param("now", now.clone());
-            let mut res = self.graph.execute(q).await?;
-            while let Ok(Some(_)) = res.next().await {}
-        }
-
-        // A couple of variation links (bidirectional could be created from both directions if desired)
-        let variations = vec![
-            (
-                "cable-lateral-raise",
-                "dumbbell-lateral-raise",
-                0.85_f32,
-                "minor",
-            ),
-            ("bench-press", "incline-bench-press", 0.65_f32, "major"),
-        ];
-
-        for (a, b, overlap, rel) in variations {
-            let q = query(
-                "MATCH (a:Exercise { slug: $a }), (b:Exercise { slug: $b }) \
-                 MERGE (a)-[r:VARIATION_OF]->(b) \
-                 ON CREATE SET r.overlap = $overlap, r.relation_type = $rel, r.created_at = $now, r.updated_at = $now \
-                 ON MATCH SET r.overlap = $overlap, r.relation_type = $rel, r.updated_at = $now RETURN a.slug AS a, b.slug AS b",
-            )
-            .param("a", a.to_string())
-            .param("b", b.to_string())
-            .param("overlap", overlap)
-            .param("rel", rel.to_string())
-            .param("now", now.clone());
-            let mut res = self.graph.execute(q).await?;
-            while let Ok(Some(_)) = res.next().await {}
-        }
-
-        Ok(())
-    }
-
     /// Dump a simple textual representation of the graph for debugging.
     /// This fetches exercises and their WORKS_MUSCLE relationships and prints them.
     pub async fn dump_graph(&self, limit: i64) -> Result<()> {
         // Query exercises and linked muscles (limit controls number of rows returned)
-        let q = query(
+        let q_exercise_muscles = query(
             "MATCH (e:Exercise)-[r:WORKS_MUSCLE]->(m:Muscle) \
              RETURN e.slug AS slug, e.name AS name, r.relation_type AS relation_type, m.name AS muscle \
              LIMIT $limit",
         )
         .param("limit", limit);
 
-        let mut result = self.graph.execute(q).await?;
+        let q_exercise_equipment = query(
+            "MATCH (e:Exercise)-[r:USES_EQUIPMENT]->(eq:Equipment) \
+             RETURN e.slug AS slug, e.name AS name, r.relation_type AS relation_type, eq.name AS equipment \
+             LIMIT $limit",
+        )
+        .param("limit", limit);
 
-        while let Ok(Some(row)) = result.next().await {
+        let mut result_exercise_muscles = self.graph.execute(q_exercise_muscles).await?;
+        let mut result_exercise_equipment = self.graph.execute(q_exercise_equipment).await?;
+
+        while let Ok(Some(row)) = result_exercise_muscles.next().await {
             // row.get returns Option<T> where T implements FromValue
             let slug: String = row.get("slug").unwrap_or_default();
             let name: String = row.get("name").unwrap_or_default();
@@ -363,6 +203,18 @@ impl GraphManager {
             println!(
                 "{} ({}) -[WORKS_MUSCLE: {}]-> {}",
                 name, slug, relation_type, muscle
+            );
+        }
+
+        while let Ok(Some(row)) = result_exercise_equipment.next().await {
+            // row.get returns Option<T> where T implements FromValue
+            let slug: String = row.get("slug").unwrap_or_default();
+            let name: String = row.get("name").unwrap_or_default();
+            let relation_type: String = row.get("relation_type").unwrap_or_default();
+            let equipment: String = row.get("equipment").unwrap_or_default();
+            println!(
+                "{} ({}) -[USES_EQUIPMENT: {}]-> {}",
+                name, slug, relation_type, equipment
             );
         }
 

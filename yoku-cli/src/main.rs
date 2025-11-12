@@ -5,14 +5,13 @@ use std::fmt;
 use std::str::FromStr;
 use uuid::Uuid;
 
-use yoku_core::db::graph::GraphManager;
 use yoku_core::db::models::DisplayableSet;
 use yoku_core::db::operations::{
     create_workout_session, delete_workout_session, delete_workout_set, get_all_exercises,
     get_all_workout_sessions, get_exercise, get_sets_for_session,
 };
-use yoku_core::parser::ParsedSet;
-use yoku_core::parser::llm::{LlmInterface, Ollama, OpenAi};
+use yoku_core::graph::GraphManager;
+use yoku_core::llm::{LlmInterface, ParsedSet};
 use yoku_core::session::Session;
 
 /// CLI entry for yoku
@@ -58,9 +57,6 @@ enum Commands {
     /// Delete a set by UUID
     DeleteSet { set_id: String },
 
-    /// Seed the Neo4j graph from Postgres (development)
-    SeedGraph {},
-
     /// Dump a textual view of the graph (for debugging)
     DumpGraph {
         /// Max number of relationships to print
@@ -91,13 +87,13 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Initialize LLM parser if needed by a command that uses it.
-    let parser: Option<Box<dyn LlmInterface>> = match cli.command {
+    let parser: Option<LlmInterface> = match cli.command {
         Commands::AddSet { .. } => {
-            let boxed: Box<dyn LlmInterface> = match cli.parser {
-                ParserType::Ollama => Ollama::new(cli.model.clone()).await?,
-                ParserType::OpenAI => OpenAi::new(cli.model.clone()).await?,
+            let llm = match cli.parser {
+                ParserType::Ollama => LlmInterface::new_ollama(cli.model.clone()).await?,
+                ParserType::OpenAI => LlmInterface::new_openai(cli.model.clone()).await?,
             };
-            Some(boxed)
+            Some(llm)
         }
         _ => None,
     };
@@ -115,12 +111,6 @@ async fn main() -> Result<()> {
             }
         }
         Commands::DeleteSet { set_id } => cmd_delete_set(&set_id).await?,
-        Commands::SeedGraph {} => {
-            // Connect to the graph manager and seed defaults
-            let gm = GraphManager::connect().await?;
-            gm.seed_defaults().await?;
-            println!("Graph seeded.");
-        }
         Commands::DumpGraph { limit } => {
             let gm = GraphManager::connect().await?;
             println!("Dumping graph with limit {}", limit);
@@ -179,7 +169,7 @@ async fn cmd_list_sets(session_id: &str) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_add_set(session_id: &str, input: &str, parser: Box<dyn LlmInterface>) -> Result<()> {
+async fn cmd_add_set(session_id: &str, input: &str, parser: LlmInterface) -> Result<()> {
     let session_uuid = Uuid::from_str(session_id)?;
 
     // Build a client-side Session and attach the workout id
@@ -191,7 +181,7 @@ async fn cmd_add_set(session_id: &str, input: &str, parser: Box<dyn LlmInterface
     let known_exs: Vec<String> = exercises.into_iter().map(|e| e.name).collect();
 
     // Parse the input using the selected LLM backend
-    let parsed: ParsedSet = parser.parse_set_string(input, &known_exs).await?;
+    let parsed: ParsedSet = yoku_core::llm::parse_set_string(&parser, input, &known_exs).await?;
 
     // Let the session handle adding the set (it will create/get exercises as needed)
     sess.add_set_from_parsed(&parsed).await?;

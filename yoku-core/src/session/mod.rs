@@ -7,7 +7,7 @@ use crate::db::operations::{
     create_workout_session, get_or_create_exercise, get_workout_session,
     update_workout_set_from_parsed,
 };
-use crate::parser::ParsedSet;
+use crate::llm::ParsedSet;
 
 pub struct Session {
     pub workout_id: Mutex<Option<Uuid>>,
