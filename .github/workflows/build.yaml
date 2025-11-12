@@ -10,21 +10,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Determinate Nix
-        uses: DeterminateSystems/determinate-nix-action@v3.5.2
-
-      - name: Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v13
-
-      - name: Build yoku-cli package
-        run: |
+      - uses: actions/checkout@v4
+      - uses: nixbuild/nix-quick-install-action@v34
+      - uses: nix-community/cache-nix-action@v6.1.3
+      - run: |
           nix build .#yoku-cli
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v5.0.0
+      - uses: actions/upload-artifact@v5.0.0
         with:
           name: binary
           path: ./result/bin/yoku-cli
