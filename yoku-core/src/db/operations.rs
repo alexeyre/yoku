@@ -13,10 +13,10 @@ use uuid::Uuid;
 use crate::{
     db::get_conn,
     db::models::{
-        Exercise, NewExercise, NewRequestString, NewUser, NewWorkoutSession, NewWorkoutSet,
-        RequestString, UpdateWorkoutSet, User, WorkoutSession, WorkoutSet,
+        Exercise, Muscle, NewExercise, NewMuscle, NewRequestString, NewUser, NewWorkoutSession,
+        NewWorkoutSet, RequestString, UpdateWorkoutSet, User, WorkoutSession, WorkoutSet,
     },
-    db::schema::{exercises, request_strings, workout_sessions, workout_sets},
+    db::schema::{exercises, muscles, request_strings, workout_sessions, workout_sets},
     llm::ParsedSet,
 };
 
@@ -157,6 +157,31 @@ pub async fn get_or_create_exercise(exercise_name: &str) -> Result<Exercise> {
     let created = diesel::insert_into(exercises::table)
         .values(&new)
         .get_result::<Exercise>(&mut conn)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    Ok(created)
+}
+
+pub async fn get_or_create_muscle(muscle_name: &str) -> Result<Muscle> {
+    let mut conn = get_conn().await;
+
+    // Try to find by exact name first
+    if let Ok(muscle) = muscles::table
+        .filter(muscles::name.eq(muscle_name))
+        .first::<Muscle>(&mut conn)
+        .await
+    {
+        return Ok(muscle);
+    }
+
+    let new = NewMuscle {
+        name: muscle_name.to_string(),
+    };
+
+    let created = diesel::insert_into(muscles::table)
+        .values(&new)
+        .get_result::<Muscle>(&mut conn)
         .await
         .map_err(anyhow::Error::from)?;
 

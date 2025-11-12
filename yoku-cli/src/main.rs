@@ -8,13 +8,15 @@ use uuid::Uuid;
 use yoku_core::db::models::DisplayableSet;
 use yoku_core::db::operations::{
     create_workout_session, delete_workout_session, delete_workout_set, get_all_exercises,
-    get_all_workout_sessions, get_exercise, get_sets_for_session,
+    get_all_workout_sessions, get_exercise, get_or_create_exercise, get_sets_for_session,
 };
 use yoku_core::graph::GraphManager;
-use yoku_core::llm::{LlmInterface, ParsedSet};
+use yoku_core::llm::{
+    LlmInterface, ParsedSet, PromptBuilder, PromptContext,
+    generate_exercise_to_equipment_and_muscles,
+};
 use yoku_core::session::Session;
 
-/// CLI entry for yoku
 #[derive(Parser, Debug)]
 #[command(version, about = "Yoku - Workout Tracker CLI", long_about = None)]
 struct Cli {
@@ -42,10 +44,14 @@ enum Commands {
     },
 
     /// Delete a workout session by UUID
-    Delete { id: String },
+    Delete {
+        id: String,
+    },
 
     /// List all sets in a session
-    ListSets { session_id: String },
+    ListSets {
+        session_id: String,
+    },
 
     /// Add a parsed set to a session (we use the LLM parser)
     AddSet {
@@ -55,7 +61,13 @@ enum Commands {
     },
 
     /// Delete a set by UUID
-    DeleteSet { set_id: String },
+    DeleteSet {
+        set_id: String,
+    },
+
+    SuggestExerciseLinks {
+        name: String,
+    },
 
     /// Dump a textual view of the graph (for debugging)
     DumpGraph {
@@ -88,7 +100,7 @@ async fn main() -> Result<()> {
 
     // Initialize LLM parser if needed by a command that uses it.
     let parser: Option<LlmInterface> = match cli.command {
-        Commands::AddSet { .. } => {
+        Commands::AddSet { .. } | Commands::SuggestExerciseLinks { .. } => {
             let llm = match cli.parser {
                 ParserType::Ollama => LlmInterface::new_ollama(cli.model.clone()).await?,
                 ParserType::OpenAI => LlmInterface::new_openai(cli.model.clone()).await?,
@@ -97,6 +109,9 @@ async fn main() -> Result<()> {
         }
         _ => None,
     };
+
+    let prompt_context = PromptContext::default();
+    let prompt_builder = PromptBuilder::new(prompt_context);
 
     match cli.command {
         Commands::List {} => cmd_list().await?,
@@ -111,6 +126,13 @@ async fn main() -> Result<()> {
             }
         }
         Commands::DeleteSet { set_id } => cmd_delete_set(&set_id).await?,
+        Commands::SuggestExerciseLinks { name } => {
+            if let Some(p) = parser {
+                cmd_suggest_exercise_links(&name, &p, &prompt_builder).await?
+            } else {
+                eprintln!("Parser not initialized");
+            }
+        }
         Commands::DumpGraph { limit } => {
             let gm = GraphManager::connect().await?;
             println!("Dumping graph with limit {}", limit);
@@ -180,8 +202,15 @@ async fn cmd_add_set(session_id: &str, input: &str, parser: LlmInterface) -> Res
     let exercises = get_all_exercises().await?;
     let known_exs: Vec<String> = exercises.into_iter().map(|e| e.name).collect();
 
-    // Parse the input using the selected LLM backend
-    let parsed: ParsedSet = yoku_core::llm::parse_set_string(&parser, input, &known_exs).await?;
+    // Build prompt context and builder (inject known exercises; examples may be provided from seed later)
+    let ctx = yoku_core::llm::PromptContext {
+        known_exercises: known_exs.clone(),
+        ..Default::default()
+    };
+    let builder = yoku_core::llm::PromptBuilder::new(ctx);
+
+    // Parse the input using the selected LLM backend and prompt builder
+    let parsed: ParsedSet = yoku_core::llm::parse_set_string(&parser, &builder, input).await?;
 
     // Let the session handle adding the set (it will create/get exercises as needed)
     sess.add_set_from_parsed(&parsed).await?;
@@ -194,5 +223,25 @@ async fn cmd_delete_set(set_id: &str) -> Result<()> {
     let uuid = Uuid::from_str(set_id)?;
     let deleted = delete_workout_set(uuid).await?;
     println!("Deleted {} rows for set {}", deleted, uuid);
+    Ok(())
+}
+
+async fn cmd_suggest_exercise_links(
+    name: &str,
+    llm: &LlmInterface,
+    builder: &PromptBuilder,
+) -> Result<()> {
+    let exercise = get_or_create_exercise(name).await?;
+    let (equip_links, muscle_links) =
+        generate_exercise_to_equipment_and_muscles(llm, builder, &exercise.name).await?;
+    for suggestion in equip_links {
+        println!("Suggested equipment link: {}", suggestion);
+    }
+    for (muscle, link_type, strength) in muscle_links {
+        println!(
+            "Suggested muscle link: {}--{}<{}> {}",
+            name, muscle, link_type, strength
+        );
+    }
     Ok(())
 }

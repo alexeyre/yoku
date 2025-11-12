@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,62 +9,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::OnceCell;
 use tokio::time::sleep;
-
-pub struct PromptBuilder {
-    known_exercises: Vec<String>,
-}
-
-impl PromptBuilder {
-    pub fn new(known_exercises: &[String]) -> Self {
-        Self {
-            known_exercises: known_exercises.to_vec(),
-        }
-    }
-
-    pub fn system_prompt(&self) -> String {
-        "You are a precise workout set parser. \
-         Your goal is to extract structured information from short workout log strings. \
-         Always return a strict JSON object matching this schema: \
-         {\"exercise\": string, \"weight\": float|null, \"reps\": integer|null, \"rpe\": float|null, \"set_count\": integer|null, \"tags\": [string], \"aoi\": string|null, \"original_string\": string}. \
-         CRITICAL: 'reps' and 'set_count' must be integers (5, not 5.0). \
-         Never include explanations or text outside of the JSON object.".to_string()
-    }
-
-    pub fn user_prompt(&self, input: &str) -> String {
-        let known_exercises_section = if self.known_exercises.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "\n\nKnown exercises in the database:\n{}\n\n\
-                 IMPORTANT: When the user mentions an exercise, try to match it to one of the known exercises above if it's clearly the same exercise (e.g., 'bench' -> 'bench press'). \
-                 However, you are FREE TO CREATE NEW EXERCISES if:\n\
-                 - The user clearly means a different exercise not in the list\n\
-                 - The user uses a specific variation (e.g., 'incline bench press' vs 'bench press')\n\
-                 - You're not confident about the match\n\n\
-                 If the user ONLY provides weight/reps/RPE without mentioning an exercise name, set 'exercise' to null.",
-                self.known_exercises.join(", ")
-            )
-        };
-
-        let rpe_scale = "\n\nRPE (Rate of Perceived Exertion) Scale:\n\
-                         - 10: Maximum effort, absolute limit, could not do another rep, also known as a one-rep max (1RM)\n                         - 9.5: Could not do another rep, but could have added slightly more weight\n                         - 9: Could do 1 more rep\n                         - 8.5: Could definitely do 1 more rep, maybe 2\n                         - 8: Could do 2 more reps\n                         - 7.5: Could do 2-3 more reps\n                         - 7: Could do 3 more reps with good form\n                         - 6: Could do 4-5 more reps\n                         - 5 and below: Very light effort, many reps in reserve\n                         Common descriptions: 'hard', 'tough', 'difficult' → ~8-9 RPE; 'easy', 'light' → ~5-6 RPE; 'moderate' → ~7 RPE";
-
-        format!(
-            "Parse the following workout log:\n{}{}{}\n\n\
-             - 'exercise': the movement name. If no exercise is mentioned, use null \"\"\n\
-             - 'weight': numeric load in kilograms or pounds if specified; otherwise null\n\
-             - 'reps': INTEGER number of repetitions (e.g., 5, 8, 12, NOT 5.0); otherwise null\n\
-             - 'rpe': Rate of Perceived Exertion (1-10 scale, can be decimal like 8.5). Use the RPE scale above to interpret user descriptions\n\
-             - 'set_count': INTEGER number of sets if mentioned (e.g., '5 sets of 5 reps' -> set_count: 5, reps: 5); otherwise null or 1\n\
-             - 'tags': any hashtags or key terms (like 'strength', 'hypertrophy', 'warmup') as a list\n\
-             - 'aoi': any other information you feel is pertinent to include that does not fit in another category\n\
-             - 'original_string': the exact input string\n\
-             IMPORTANT: 'reps' and 'set_count' must be integers (5, not 5.0). 'weight' and 'rpe' can be floats.\n\
-             Return only valid JSON conforming to the schema.",
-            input, known_exercises_section, rpe_scale
-        )
-    }
-}
 
 fn deserialize_reps<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
 where
@@ -167,7 +112,7 @@ impl LlmInterface {
         }
     }
 
-    pub fn new_mock_map(map: std::collections::HashMap<String, String>) -> Self {
+    pub fn new_mock_map(map: HashMap<String, String>) -> Self {
         let m = Arc::new(map);
         Self::new_mock_fn(move |system, user| {
             let key = format!("{}\n--\n{}", system, user);
@@ -281,7 +226,6 @@ impl LlmInterface {
         if max_attempts == 0 {
             return Err(anyhow!("max_attempts must be >= 1"));
         }
-
         let mut attempt: usize = 0;
         loop {
             attempt += 1;
@@ -291,7 +235,7 @@ impl LlmInterface {
                     if attempt >= max_attempts {
                         return Err(e);
                     }
-                    let cap_shift = ((attempt - 1) as u32).min(10);
+                    let cap_shift = ((attempt - 1) as u32).min(20);
                     let exp = 1u128 << cap_shift;
                     let base_ms = base_delay.as_millis() as u128;
                     let delay_ms = base_ms.saturating_mul(exp);
@@ -310,14 +254,199 @@ impl LlmInterface {
     }
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct ParseExample {
+    pub input: String,
+    pub output_json: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct EquipmentToExercisesExample {
+    pub equipment: String,
+    pub result_json: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ExerciseToEqMusExample {
+    pub exercise: String,
+    pub result_json: String,
+}
+
+#[derive(Clone)]
+pub struct PromptContext {
+    pub known_exercises: Vec<String>,
+    pub known_equipment: Vec<String>,
+    pub known_muscles: Vec<String>,
+    pub parse_examples: Vec<ParseExample>,
+    pub equipment_examples: Vec<EquipmentToExercisesExample>,
+    pub exercise_examples: Vec<ExerciseToEqMusExample>,
+    pub max_examples: usize,
+    pub max_example_chars: usize,
+}
+
+impl Default for PromptContext {
+    fn default() -> Self {
+        Self {
+            known_exercises: vec![],
+            known_equipment: vec![],
+            known_muscles: vec![],
+            parse_examples: vec![],
+            equipment_examples: vec![],
+            exercise_examples: vec![],
+            max_examples: 3,
+            max_example_chars: 1500,
+        }
+    }
+}
+
+pub enum LinkKind {
+    EquipmentToExercises,
+    ExerciseToEquipmentAndMuscles,
+}
+
+pub struct PromptBuilder {
+    ctx: PromptContext,
+}
+
+impl PromptBuilder {
+    pub fn new(ctx: PromptContext) -> Self {
+        Self { ctx }
+    }
+
+    fn examples_block_for_parse(&self) -> String {
+        let mut block = String::new();
+        let mut count = 0usize;
+        for ex in &self.ctx.parse_examples {
+            if count >= self.ctx.max_examples {
+                break;
+            }
+            if block.len() + ex.input.len() + ex.output_json.len() > self.ctx.max_example_chars {
+                break;
+            }
+            block.push_str(&format!(
+                "Input: \"{}\"\nOutput:\n{}\n\n",
+                ex.input, ex.output_json
+            ));
+            count += 1;
+        }
+        block
+    }
+
+    fn examples_block_for_equipment_links(&self) -> String {
+        let mut block = String::new();
+        let mut count = 0usize;
+        for ex in &self.ctx.equipment_examples {
+            if count >= self.ctx.max_examples {
+                break;
+            }
+            if block.len() + ex.equipment.len() + ex.result_json.len() > self.ctx.max_example_chars
+            {
+                break;
+            }
+            block.push_str(&format!(
+                "Equipment: {}\nExercises: {}\n\n",
+                ex.equipment, ex.result_json
+            ));
+            count += 1;
+        }
+        block
+    }
+
+    fn examples_block_for_exercise_links(&self) -> String {
+        let mut block = String::new();
+        let mut count = 0usize;
+        for ex in &self.ctx.exercise_examples {
+            if count >= self.ctx.max_examples {
+                break;
+            }
+            if block.len() + ex.exercise.len() + ex.result_json.len() > self.ctx.max_example_chars {
+                break;
+            }
+            block.push_str(&format!(
+                "Exercise: {}\nResult: {}\n\n",
+                ex.exercise, ex.result_json
+            ));
+            count += 1;
+        }
+        block
+    }
+
+    pub fn system_parse_prompt(&self) -> String {
+        "You are a precise workout set parser. Return only a single JSON object matching the schema: {\"exercise\": string|null, \"weight\": float|null, \"reps\": integer|null, \"rpe\": float|null, \"set_count\": integer|null, \"tags\": [string], \"aoi\": string|null, \"original_string\": string}. 'reps' and 'set_count' must be integers.".to_string()
+    }
+
+    pub fn user_parse_prompt(&self, input: &str) -> String {
+        let known = if self.ctx.known_exercises.is_empty() {
+            "".to_string()
+        } else {
+            format!(
+                "\nKnown exercises: {}\n",
+                self.ctx.known_exercises.join(", ")
+            )
+        };
+        let ex_block = self.examples_block_for_parse();
+        format!(
+            "Parse the following workout log:\n{}\n{}{}\nReturn only valid JSON matching the schema.",
+            input, known, ex_block
+        )
+    }
+
+    pub fn system_link_prompt(&self, kind: LinkKind) -> String {
+        match kind {
+            LinkKind::EquipmentToExercises => {
+                "Given a piece of equipment, return a JSON array of exercise names that typically use that equipment. Return only a JSON array of strings.".to_string()
+            }
+            LinkKind::ExerciseToEquipmentAndMuscles => {
+                // NOTE: muscles must be returned as triples: [muscle_name, relation_type, strength]
+                // relation_type is a string like "primary", "secondary", etc.
+                // strength is a number between 0.0 and 1.0 representing confidence/strength.
+                // Return only valid JSON and nothing else.
+                "Given an exercise name, return a JSON object with keys \"equipment\" and \"muscles\". \"equipment\" should be an array of strings. \"muscles\" should be an array of 3-element tuples (as JSON arrays) where each tuple is [muscle_name (string), relation_type (string, e.g., \"primary\", \"secondary\"), strength (number between 0.0 and 1.0)]. Return only valid JSON and nothing else.".to_string()
+            }
+        }
+    }
+
+    pub fn user_link_prompt_equipment(&self, equipment: &str) -> String {
+        let known_section = if self.ctx.known_exercises.is_empty() {
+            "".to_string()
+        } else {
+            format!("Known exercises: {}\n", self.ctx.known_exercises.join(", "))
+        };
+        let ex_block = self.examples_block_for_equipment_links();
+        format!(
+            "Equipment: {}\n{}{}\nReturn the most likely exercises (names) that use this equipment as a JSON array.",
+            equipment, known_section, ex_block
+        )
+    }
+
+    pub fn user_link_prompt_exercise(&self, exercise: &str) -> String {
+        let known_eq = if self.ctx.known_equipment.is_empty() {
+            "".to_string()
+        } else {
+            format!("Known equipment: {}\n", self.ctx.known_equipment.join(", "))
+        };
+        let known_m = if self.ctx.known_muscles.is_empty() {
+            "".to_string()
+        } else {
+            format!("Known muscles: {}\n", self.ctx.known_muscles.join(", "))
+        };
+        let ex_block = self.examples_block_for_exercise_links();
+        // Example output schema now expects muscles as arrays: [["Biceps","primary",0.9], ["Triceps","secondary",0.4]]
+        let base = format!(
+            "Exercise: {}\n{}{}Return JSON like: {{\"equipment\": [\"...\"], \"muscles\": [[\"Muscle Name\",\"relation_type\",strength], ...]}}",
+            exercise, known_eq, known_m
+        );
+        base + &ex_block
+    }
+}
+
 pub async fn parse_set_string(
     llm: &LlmInterface,
+    builder: &PromptBuilder,
     input: &str,
-    known_exercises: &[String],
 ) -> Result<ParsedSet> {
-    let prompt_builder = PromptBuilder::new(known_exercises);
-    let system_prompt = prompt_builder.system_prompt();
-    let user_prompt = prompt_builder.user_prompt(input);
+    let system_prompt = builder.system_parse_prompt();
+    let user_prompt = builder.user_parse_prompt(input);
     let mut parsed: ParsedSet = llm.call_json(&system_prompt, &user_prompt).await?;
     parsed = ParsedSet::with_original(parsed, input.to_string());
     Ok(parsed)
@@ -325,87 +454,72 @@ pub async fn parse_set_string(
 
 pub async fn generate_equipment_to_exercise_links(
     llm: &LlmInterface,
+    builder: &PromptBuilder,
     equipment: &str,
-    known_exercises: &[String],
 ) -> Result<Vec<String>> {
-    let system = "You are a helpful assistant that, given a piece of equipment, returns a JSON array of exercise names that typically use that equipment. Return only a JSON array of strings (no additional text). Example: [\"barbell back squat\", \"front squat\"]";
-    let known_section = if known_exercises.is_empty() {
-        "".to_string()
-    } else {
-        format!("\nKnown exercises: {}", known_exercises.join(", "))
-    };
-    let user = format!(
-        "Equipment: {}\n{}\nReturn the most likely exercises (names) that use this equipment.",
-        equipment, known_section
-    );
-    let res: Vec<String> = llm.call_json(system, &user).await?;
+    let system = builder.system_link_prompt(LinkKind::EquipmentToExercises);
+    let user = builder.user_link_prompt_equipment(equipment);
+    let res: Vec<String> = llm.call_json(&system, &user).await?;
     Ok(res)
 }
 
 pub async fn generate_exercise_to_equipment_and_muscles(
     llm: &LlmInterface,
+    builder: &PromptBuilder,
     exercise: &str,
-    known_equipment: &[String],
-    known_muscles: &[String],
-) -> Result<(Vec<String>, Vec<String>)> {
-    let system = "You are a helpful assistant that, given the name of an exercise, returns a JSON object with two keys: \"equipment\" and \"muscles\". Each value should be an array of strings. Return only valid JSON.";
-    let known_eq = if known_equipment.is_empty() {
-        "".to_string()
-    } else {
-        format!("\nKnown equipment: {}", known_equipment.join(", "))
-    };
-    let known_m = if known_muscles.is_empty() {
-        "".to_string()
-    } else {
-        format!("\nKnown muscles: {}", known_muscles.join(", "))
-    };
-    let user = format!(
-        "Exercise: {}\n{}\n{}\nReturn JSON like: {{\"equipment\": [\"...\"], \"muscles\": [\"...\"]}}",
-        exercise, known_eq, known_m
-    );
-
+) -> Result<(Vec<String>, Vec<(String, String, f32)>)> {
+    let system = builder.system_link_prompt(LinkKind::ExerciseToEquipmentAndMuscles);
+    let user = builder.user_link_prompt_exercise(exercise);
     #[derive(Deserialize)]
     struct ResShape {
         equipment: Vec<String>,
-        muscles: Vec<String>,
+        muscles: Vec<(String, String, f32)>,
     }
-
-    let res: ResShape = llm.call_json(system, &user).await?;
+    let res: ResShape = llm.call_json(&system, &user).await?;
     Ok((res.equipment, res.muscles))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use std::time::Duration;
 
     #[tokio::test]
-    async fn test_mock_parse_set() {
-        let reply = r#"{"exercise":"bench press","weight":100.0,"reps":5,"rpe":8.0,"set_count":5,"tags":[],"aoi":null,"original_string":""}"#;
-        let llm = LlmInterface::new_mock_fn(move |_sys, _usr| reply.to_string());
-        let parsed = parse_set_string(&llm, "5x5 bench press @ 8 RPE", &[])
+    async fn mock_parse_examples() {
+        let ctx = PromptContext {
+            known_exercises: vec!["Barbell Back Squat".into(), "Deadlift".into()],
+            parse_examples: vec![
+                ParseExample { input: "5x5 barbell squat 100kg @8 RPE".into(), output_json: r#"{"exercise":"Barbell Back Squat","weight":100.0,"reps":5,"rpe":8.0,"set_count":5,"tags":[],"aoi":null,"original_string":"5x5 barbell squat 100kg @8 RPE"}"#.into() }
+            ],
+            ..Default::default()
+        };
+        let builder = PromptBuilder::new(ctx);
+        let reply = r#"{"exercise":"Barbell Back Squat","weight":100.0,"reps":5,"rpe":8.0,"set_count":5,"tags":[],"aoi":null,"original_string":""}"#;
+        let llm = LlmInterface::new_mock_fn(move |_s, _u| reply.to_string());
+        let parsed = parse_set_string(&llm, &builder, "5x5 barbell squat 100kg @8 RPE")
             .await
             .unwrap();
-        assert_eq!(parsed.exercise.to_lowercase(), "bench press");
+        assert_eq!(parsed.exercise.to_lowercase(), "barbell back squat");
         assert_eq!(parsed.reps, Some(5));
-    }
-
-    #[tokio::test]
-    async fn test_retry_backoff_basic() {
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let attempts_clone = attempts.clone();
-        let llm = LlmInterface::new_mock_fn(move |_s, _u| {
-            let prev = attempts_clone.fetch_add(1, Ordering::SeqCst);
-            if prev < 2 {
-                "".to_string()
-            } else {
-                r#"{"equipment":["barbell"],"muscles":["quadriceps"]}"#.to_string()
-            }
+        let links_ctx = PromptContext {
+            known_exercises: vec!["Barbell Back Squat".into(), "Deadlift".into()],
+            equipment_examples: vec![EquipmentToExercisesExample {
+                equipment: "Barbell".into(),
+                result_json: r#"["Barbell Back Squat","Deadlift"]"#.into(),
+            }],
+            ..Default::default()
+        };
+        let lbuilder = PromptBuilder::new(links_ctx);
+        let equip_llm = LlmInterface::new_mock_fn(move |_s, _u| {
+            r#"["Barbell Back Squat","Deadlift"]"#.to_string()
         });
-        let res = llm
-            .call_with_retry("sys", "user", 5, Duration::from_millis(10))
-            .await;
-        assert!(res.is_ok());
+        let suggestions = generate_equipment_to_exercise_links(&equip_llm, &lbuilder, "Barbell")
+            .await
+            .unwrap();
+        assert!(
+            suggestions
+                .iter()
+                .any(|s| s.to_lowercase().contains("squat"))
+        );
     }
 }
