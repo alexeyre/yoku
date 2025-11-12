@@ -32,7 +32,6 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    
     List {},
 
     Create {
@@ -63,7 +62,6 @@ enum Commands {
     },
 
     DumpGraph {
-        
         #[arg(short, long, default_value_t = 50)]
         limit: i64,
     },
@@ -224,7 +222,7 @@ async fn cmd_suggest_exercise_links(
     builder: &PromptBuilder,
 ) -> Result<()> {
     let exercise = get_or_create_exercise(name).await?;
-    let (equip_links, muscle_links) =
+    let (equip_links, muscle_links, variant_links) =
         generate_exercise_to_equipment_and_muscles(llm, builder, &exercise.name).await?;
     for suggestion in equip_links {
         println!("Suggested equipment link: {}", suggestion);
@@ -234,6 +232,9 @@ async fn cmd_suggest_exercise_links(
             "Suggested muscle link: {}--{}<{}> {}",
             name, muscle, link_type, strength
         );
+    }
+    for suggestion in variant_links {
+        println!("Suggested variant link: {}", suggestion);
     }
     Ok(())
 }

@@ -301,7 +301,7 @@ impl Default for PromptContext {
 
 pub enum LinkKind {
     EquipmentToExercises,
-    ExerciseToEquipmentAndMuscles,
+    ExerciseToEquipmentMusclesVariants,
 }
 
 pub struct PromptBuilder {
@@ -396,12 +396,8 @@ impl PromptBuilder {
             LinkKind::EquipmentToExercises => {
                 "Given a piece of equipment, return a JSON array of exercise names that typically use that equipment. Return only a JSON array of strings.".to_string()
             }
-            LinkKind::ExerciseToEquipmentAndMuscles => {
-                // NOTE: muscles must be returned as triples: [muscle_name, relation_type, strength]
-                // relation_type is a string like "primary", "secondary", etc.
-                // strength is a number between 0.0 and 1.0 representing confidence/strength.
-                // Return only valid JSON and nothing else.
-                "Given an exercise name, return a JSON object with keys \"equipment\" and \"muscles\". \"equipment\" should be an array of strings. \"muscles\" should be an array of 3-element tuples (as JSON arrays) where each tuple is [muscle_name (string), relation_type (string, e.g., \"primary\", \"secondary\"), strength (number between 0.0 and 1.0)]. Return only valid JSON and nothing else.".to_string()
+            LinkKind::ExerciseToEquipmentMusclesVariants => {
+                "Given an exercise name, return a JSON object with keys \"equipment\", \"muscles\", \"related_exercises\". \"equipment\" should be an array of strings. \"muscles\" should be an array of 3-element tuples (as JSON arrays) where each tuple is [muscle_name (string), relation_type (string, e.g., \"primary\", \"secondary\"), strength (number between 0.0 and 1.0)]. \"related_exercises\" should be an array of strings of names of exercises this exercise is related to. Return only valid JSON and nothing else.".to_string()
             }
         }
     }
@@ -430,11 +426,16 @@ impl PromptBuilder {
         } else {
             format!("Known muscles: {}\n", self.ctx.known_muscles.join(", "))
         };
+        let known_ex = if self.ctx.known_exercises.is_empty() {
+            "".to_string()
+        } else {
+            format!("Known exercises: {}\n", self.ctx.known_exercises.join(", "))
+        };
         let ex_block = self.examples_block_for_exercise_links();
         // Example output schema now expects muscles as arrays: [["Biceps","primary",0.9], ["Triceps","secondary",0.4]]
         let base = format!(
-            "Exercise: {}\n{}{}Return JSON like: {{\"equipment\": [\"...\"], \"muscles\": [[\"Muscle Name\",\"relation_type\",strength], ...]}}",
-            exercise, known_eq, known_m
+            "Exercise: {}\n{}{}{}Return JSON like: {{\"equipment\": [\"...\"], \"muscles\": [[\"Muscle Name\",\"relation_type\",strength], ...], \"related_exercises\": [\"...\", ...]}}",
+            exercise, known_eq, known_m, known_ex
         );
         base + &ex_block
     }
@@ -467,16 +468,17 @@ pub async fn generate_exercise_to_equipment_and_muscles(
     llm: &LlmInterface,
     builder: &PromptBuilder,
     exercise: &str,
-) -> Result<(Vec<String>, Vec<(String, String, f32)>)> {
-    let system = builder.system_link_prompt(LinkKind::ExerciseToEquipmentAndMuscles);
+) -> Result<(Vec<String>, Vec<(String, String, f32)>, Vec<String>)> {
+    let system = builder.system_link_prompt(LinkKind::ExerciseToEquipmentMusclesVariants);
     let user = builder.user_link_prompt_exercise(exercise);
     #[derive(Deserialize)]
     struct ResShape {
         equipment: Vec<String>,
         muscles: Vec<(String, String, f32)>,
+        related_exercises: Vec<String>,
     }
     let res: ResShape = llm.call_json(&system, &user).await?;
-    Ok((res.equipment, res.muscles))
+    Ok((res.equipment, res.muscles, res.related_exercises))
 }
 
 #[cfg(test)]
