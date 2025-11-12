@@ -5,7 +5,8 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs =
+    { self, nixpkgs }:
     let
       # List of supported systems
       supportedSystems = [
@@ -16,49 +17,56 @@
       ];
 
       # Helper to map over all systems
-      forAllSystems = f: nixpkgs.lib.genAttrs supportedSystems (system:
-        let
-          pkgs = import nixpkgs { inherit system; };
-        in
-        f system pkgs
-      );
+      forAllSystems =
+        f:
+        nixpkgs.lib.genAttrs supportedSystems (
+          system:
+          let
+            pkgs = import nixpkgs { inherit system; };
+          in
+          f system pkgs
+        );
     in
     {
-      packages = forAllSystems (system: pkgs: {
-        yoku-cli = pkgs.rustPlatform.buildRustPackage {
-          pname = "yoku-cli";
-          version = "0.1.0";
+      packages = forAllSystems (
+        system: pkgs: {
+          yoku-cli = pkgs.rustPlatform.buildRustPackage {
+            pname = "yoku-cli";
+            version = "0.1.0";
 
-          src = ./.;
+            src = ./.;
 
-          cargoLock = {
-            lockFile = ./Cargo.lock;
+            cargoLock = {
+              lockFile = ./Cargo.lock;
+            };
+
+            nativeBuildInputs = with pkgs; [ pkg-config ];
+
+            buildInputs = with pkgs; [
+              openssl
+              postgresql
+            ];
+
+            cargoBuildFlags = [
+              "--bin"
+              "yoku-cli"
+              "-p"
+              "yoku-cli"
+            ];
+
+            meta = with pkgs.lib; {
+              description = "Yoku workout tracker CLI";
+              license = licenses.mit;
+              platforms = supportedSystems;
+            };
           };
 
-          nativeBuildInputs = with pkgs; [ pkg-config ];
+          default = self.packages.${system}.yoku-cli;
+        }
+      );
 
-          buildInputs = with pkgs; [
-            openssl
-            postgresql
-          ];
-
-          cargoBuildFlags = [
-            "--bin" "yoku-cli"
-            "-p" "yoku-cli"
-          ];
-
-          meta = with pkgs.lib; {
-            description = "Yoku workout tracker CLI";
-            license = licenses.mit;
-            platforms = supportedSystems;
-          };
-        };
-
-        default = self.packages.${system}.yoku-cli;
-      });
-
-      devShells = forAllSystems (system: pkgs:
-        {
+      devShells = forAllSystems (
+        system: pkgs: {
           default = pkgs.mkShell {
             nativeBuildInputs = with pkgs; [ postgresql ];
             buildInputs = with pkgs; [ diesel-cli rustc cargo neo4j ];
