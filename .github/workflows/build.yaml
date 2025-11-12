@@ -1,0 +1,30 @@
+name: Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Determinate Nix
+        uses: DeterminateSystems/determinate-nix-action@v3.5.2
+
+      - name: Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - name: Build yoku-cli package
+        run: |
+          nix build .#yoku-cli
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v5.0.0
+        with:
+          name: binary
+          path: ./result/bin/yoku-cli
