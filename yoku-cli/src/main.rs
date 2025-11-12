@@ -5,6 +5,7 @@ use std::fmt;
 use std::str::FromStr;
 use uuid::Uuid;
 
+use yoku_core::db::graph::GraphManager;
 use yoku_core::db::models::DisplayableSet;
 use yoku_core::db::operations::{
     create_workout_session, delete_workout_session, delete_workout_set, get_all_exercises,
@@ -56,6 +57,16 @@ enum Commands {
 
     /// Delete a set by UUID
     DeleteSet { set_id: String },
+
+    /// Seed the Neo4j graph from Postgres (development)
+    SeedGraph {},
+
+    /// Dump a textual view of the graph (for debugging)
+    DumpGraph {
+        /// Max number of relationships to print
+        #[arg(short, long, default_value_t = 50)]
+        limit: i64,
+    },
 }
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -104,6 +115,17 @@ async fn main() -> Result<()> {
             }
         }
         Commands::DeleteSet { set_id } => cmd_delete_set(&set_id).await?,
+        Commands::SeedGraph {} => {
+            // Connect to the graph manager and seed defaults
+            let gm = GraphManager::connect().await?;
+            gm.seed_defaults().await?;
+            println!("Graph seeded.");
+        }
+        Commands::DumpGraph { limit } => {
+            let gm = GraphManager::connect().await?;
+            println!("Dumping graph with limit {}", limit);
+            gm.dump_graph(limit).await?;
+        }
     }
 
     Ok(())
