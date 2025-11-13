@@ -1,0 +1,19 @@
+[package]
+name = "yoku-uniffi"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["staticlib", "lib"]
+name = "yoku_uniffi"
+
+[dependencies]
+uniffi = "0.29"
+yoku-core = { path = "../yoku-core" }
+cargo-swift = "0.9.0"
+anyhow = "1.0.100"
+
+[build-dependencies]
+cargo-swift = "0.9.0"

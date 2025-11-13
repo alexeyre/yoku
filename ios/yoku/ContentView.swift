@@ -1,21 +1,18 @@
-//
-//  ContentView.swift
-//  yoku
-//
-//  Created by Alex Holder on 12/11/2025.
-//
-
 import SwiftUI
+import YokuUniffi
 
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        VStack(spacing: 0) {
+            InformationHeader()
+                .background(Color(.systemBackground)) // optional: keeps header visible if content scrolls under
+            ScrollView {
+                VStack(spacing: 16) {
+                    
+                }
+                .padding()
+            }
         }
-        .padding()
     }
 }
 

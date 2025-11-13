@@ -6,12 +6,18 @@
 //
 
 import SwiftUI
+import YokuUniffi
 
 @main
 struct yokuApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .task {
+                    let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                    let dbPath = docsDir.appendingPathComponent("app.db").path
+                    await setupDatabase(path: dbPath);
+                }
         }
     }
 }
