@@ -2,79 +2,79 @@
 
 diesel::table! {
     exercise_muscles (exercise_id, muscle_id) {
-        exercise_id -> Uuid,
-        muscle_id -> Uuid,
+        exercise_id -> Integer,
+        muscle_id -> Integer,
         relation_type -> Text,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
+        created_at -> Integer,
+        updated_at -> Integer,
     }
 }
 
 diesel::table! {
     exercises (id) {
-        id -> Uuid,
+        id -> Integer,
         slug -> Text,
         name -> Text,
         description -> Nullable<Text>,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
+        created_at -> Integer,
+        updated_at -> Integer,
     }
 }
 
 diesel::table! {
     muscles (id) {
-        id -> Uuid,
+        id -> Integer,
         name -> Text,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
+        created_at -> Integer,
+        updated_at -> Integer,
     }
 }
 
 diesel::table! {
     request_strings (id) {
-        id -> Uuid,
-        user_id -> Uuid,
+        id -> Integer,
+        user_id -> Integer,
         string -> Text,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
+        created_at -> Integer,
+        updated_at -> Integer,
     }
 }
 
 diesel::table! {
     users (id) {
-        id -> Uuid,
+        id -> Integer,
         username -> Text,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
+        created_at -> Integer,
+        updated_at -> Integer,
     }
 }
 
 diesel::table! {
     workout_sessions (id) {
-        id -> Uuid,
-        user_id -> Nullable<Uuid>,
+        id -> Integer,
+        user_id -> Nullable<Integer>,
         name -> Nullable<Text>,
-        date -> Date,
-        duration_seconds -> Int4,
+        date -> Text,
+        duration_seconds -> Integer,
         notes -> Nullable<Text>,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
+        created_at -> Integer,
+        updated_at -> Integer,
     }
 }
 
 diesel::table! {
     workout_sets (id) {
-        id -> Uuid,
-        session_id -> Uuid,
-        exercise_id -> Uuid,
-        request_string_id -> Uuid,
-        weight -> Float4,
-        reps -> Int4,
-        set_index -> Int4,
-        rpe -> Nullable<Float4>,
+        id -> Integer,
+        session_id -> Integer,
+        exercise_id -> Integer,
+        request_string_id -> Integer,
+        weight -> Float,
+        reps -> Integer,
+        set_index -> Integer,
+        rpe -> Nullable<Float>,
         notes -> Nullable<Text>,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
+        created_at -> Integer,
+        updated_at -> Integer,
     }
 }
 

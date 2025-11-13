@@ -1,9 +1,7 @@
-
 use anyhow::Result;
+use diesel::RunQueryDsl;
 use diesel::dsl::max;
 use diesel::prelude::*;
-use diesel_async::RunQueryDsl;
-use uuid::Uuid;
 
 use crate::{
     db::get_conn,
@@ -25,7 +23,7 @@ fn slugify(name: &str) -> String {
             _ => '-',
         })
         .collect();
-    
+
     let mut out = String::with_capacity(s.len());
     let mut prev_dash = false;
     for ch in s.chars() {
@@ -39,19 +37,25 @@ fn slugify(name: &str) -> String {
             prev_dash = false;
         }
     }
-    
+
     out.trim_matches('-').to_string()
 }
 
+/// Create a new workout session. The DB `id` is generated (UUID v4 bytes) by this function.
 pub async fn create_workout_session(
-    user_id: Option<Uuid>,
+    user_id: Option<i32>,
     name: Option<String>,
     notes: Option<String>,
     duration_seconds: Option<i32>,
 ) -> Result<WorkoutSession> {
-    let mut conn = get_conn().await;
+    // lock the shared SqliteConnection mutex
+    let mut conn = get_conn().await.lock().await;
 
-    let date = chrono::Utc::now().date_naive();
+    // store date as ISO-8601 string (schema defines `date` as Text)
+    let date = chrono::Utc::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
     let dur_secs = duration_seconds.unwrap_or(0);
 
     let new = NewWorkoutSession {
@@ -64,62 +68,57 @@ pub async fn create_workout_session(
 
     let res = diesel::insert_into(workout_sessions::table)
         .values(&new)
-        .get_result::<WorkoutSession>(&mut conn)
-        .await
+        .returning(WorkoutSession::as_returning())
+        .get_result(&mut *conn)
         .map_err(anyhow::Error::from)?;
 
     Ok(res)
 }
 
-pub async fn get_workout_session(session_id: &Uuid) -> Result<WorkoutSession> {
-    let mut conn = get_conn().await;
+pub async fn get_workout_session(session_id: i32) -> Result<WorkoutSession> {
+    let mut conn = get_conn().await.lock().await;
     workout_sessions::table
         .find(session_id)
-        .first::<WorkoutSession>(&mut conn)
-        .await
+        .first::<WorkoutSession>(&mut *conn)
         .map_err(Into::into)
 }
 
 pub async fn get_all_workout_sessions() -> Result<Vec<WorkoutSession>> {
-    let mut conn = get_conn().await;
+    let mut conn = get_conn().await.lock().await;
     workout_sessions::table
-        .load::<WorkoutSession>(&mut conn)
-        .await
+        .load::<WorkoutSession>(&mut *conn)
         .map_err(Into::into)
 }
 
-pub async fn delete_workout_session(session_id: Uuid) -> Result<usize> {
-    let mut conn = get_conn().await;
+pub async fn delete_workout_session(session_id: i32) -> Result<usize> {
+    let mut conn = get_conn().await.lock().await;
     diesel::delete(workout_sessions::table.find(session_id))
-        .execute(&mut conn)
-        .await
+        .execute(&mut *conn)
         .map_err(Into::into)
 }
 
-pub async fn get_exercise(exercise_id: &Uuid) -> Result<Exercise> {
-    let mut conn = get_conn().await;
+pub async fn get_exercise(exercise_id: i32) -> Result<Exercise> {
+    let mut conn = get_conn().await.lock().await;
     exercises::table
         .find(exercise_id)
-        .first::<Exercise>(&mut conn)
-        .await
+        .first::<Exercise>(&mut *conn)
         .map_err(Into::into)
 }
 
 pub async fn get_all_exercises() -> Result<Vec<Exercise>> {
-    let mut conn = get_conn().await;
+    let mut conn = get_conn().await.lock().await;
     exercises::table
-        .load::<Exercise>(&mut conn)
-        .await
+        .load::<Exercise>(&mut *conn)
         .map_err(Into::into)
 }
 
+/// Get an exercise by name or create it. When creating, generate a UUID v4 (16 bytes) for `id`.
 pub async fn get_or_create_exercise(exercise_name: &str) -> Result<Exercise> {
-    let mut conn = get_conn().await;
+    let mut conn = get_conn().await.lock().await;
 
     if let Ok(exercise) = exercises::table
         .filter(exercises::name.eq(exercise_name))
-        .first::<Exercise>(&mut conn)
-        .await
+        .first::<Exercise>(&mut *conn)
     {
         return Ok(exercise);
     }
@@ -134,20 +133,19 @@ pub async fn get_or_create_exercise(exercise_name: &str) -> Result<Exercise> {
 
     let created = diesel::insert_into(exercises::table)
         .values(&new)
-        .get_result::<Exercise>(&mut conn)
-        .await
+        .get_result::<Exercise>(&mut *conn)
         .map_err(anyhow::Error::from)?;
 
     Ok(created)
 }
 
+/// Get a muscle by name or create it (generates id).
 pub async fn get_or_create_muscle(muscle_name: &str) -> Result<Muscle> {
-    let mut conn = get_conn().await;
+    let mut conn = get_conn().await.lock().await;
 
     if let Ok(muscle) = muscles::table
         .filter(muscles::name.eq(muscle_name))
-        .first::<Muscle>(&mut conn)
-        .await
+        .first::<Muscle>(&mut *conn)
     {
         return Ok(muscle);
     }
@@ -158,21 +156,20 @@ pub async fn get_or_create_muscle(muscle_name: &str) -> Result<Muscle> {
 
     let created = diesel::insert_into(muscles::table)
         .values(&new)
-        .get_result::<Muscle>(&mut conn)
-        .await
+        .get_result::<Muscle>(&mut *conn)
         .map_err(anyhow::Error::from)?;
 
     Ok(created)
 }
 
+/// Get or create a user by username. When creating, generate id.
 pub async fn get_or_create_user(username: &str) -> Result<User> {
     use crate::db::schema::users::dsl as users_dsl;
-    let mut conn = get_conn().await;
-    
+    let mut conn = get_conn().await.lock().await;
+
     if let Ok(u) = users_dsl::users
         .filter(users_dsl::username.eq(username))
-        .first::<User>(&mut conn)
-        .await
+        .first::<User>(&mut *conn)
     {
         return Ok(u);
     }
@@ -183,15 +180,15 @@ pub async fn get_or_create_user(username: &str) -> Result<User> {
 
     let created = diesel::insert_into(users_dsl::users)
         .values(&new)
-        .get_result::<User>(&mut conn)
-        .await
+        .get_result::<User>(&mut *conn)
         .map_err(anyhow::Error::from)?;
 
     Ok(created)
 }
 
-pub async fn create_request_string(user_id: Uuid, input: String) -> Result<RequestString> {
-    let mut conn = get_conn().await;
+/// Create a request string row. Generates id for the row.
+pub async fn create_request_string(user_id: i32, input: String) -> Result<RequestString> {
+    let mut conn = get_conn().await.lock().await;
     let new = NewRequestString {
         user_id,
         string: input,
@@ -199,8 +196,7 @@ pub async fn create_request_string(user_id: Uuid, input: String) -> Result<Reque
 
     diesel::insert_into(request_strings::table)
         .values(&new)
-        .get_result::<RequestString>(&mut conn)
-        .await
+        .get_result::<RequestString>(&mut *conn)
         .map_err(anyhow::Error::from)
 }
 
@@ -212,31 +208,31 @@ pub async fn create_request_string_for_username(
     create_request_string(user.id, input).await
 }
 
+/// Add a single workout set (generates an id for the set row).
 pub async fn add_workout_set(
-    session_id: &Uuid,
-    exercise_id: &Uuid,
-    request_string_id: &Uuid,
+    session_id: &i32,
+    exercise_id: &i32,
+    request_string_id: &i32,
     weight: &f32,
     reps: &i32,
     rpe: Option<f32>,
 ) -> Result<WorkoutSet> {
-    let mut conn = get_conn().await;
+    let mut conn = get_conn().await.lock().await;
 
     let max_index: Option<i32> = workout_sets::table
         .filter(workout_sets::session_id.eq(session_id))
         .filter(workout_sets::exercise_id.eq(exercise_id))
         .select(max(workout_sets::set_index))
-        .first(&mut conn)
-        .await
+        .first(&mut *conn)
         .ok()
         .flatten();
 
     let next_index = max_index.map(|n| n + 1).unwrap_or(1);
 
     let new = NewWorkoutSet {
-        session_id: *session_id,
-        exercise_id: *exercise_id,
-        request_string_id: *request_string_id,
+        session_id: session_id.clone(),
+        exercise_id: exercise_id.clone(),
+        request_string_id: request_string_id.clone(),
         weight: *weight,
         reps: *reps,
         set_index: next_index,
@@ -246,30 +242,29 @@ pub async fn add_workout_set(
 
     let created = diesel::insert_into(workout_sets::table)
         .values(&new)
-        .get_result::<WorkoutSet>(&mut conn)
-        .await
+        .get_result::<WorkoutSet>(&mut *conn)
         .map_err(anyhow::Error::from)?;
 
     Ok(created)
 }
 
+/// Add multiple sets to a workout. Each set gets its own generated id.
 pub async fn add_multiple_sets_to_workout(
-    session_id: &Uuid,
-    exercise_id: &Uuid,
-    request_string_id: &Uuid,
+    session_id: &i32,
+    exercise_id: &i32,
+    request_string_id: &i32,
     weight: &f32,
     reps: &i32,
     rpe: Option<f32>,
     set_count: i32,
 ) -> Result<Vec<WorkoutSet>> {
-    let mut conn = get_conn().await;
+    let mut conn = get_conn().await.lock().await;
 
     let max_index: Option<i32> = workout_sets::table
         .filter(workout_sets::session_id.eq(session_id))
         .filter(workout_sets::exercise_id.eq(exercise_id))
         .select(max(workout_sets::set_index))
-        .first(&mut conn)
-        .await
+        .first(&mut *conn)
         .ok()
         .flatten();
 
@@ -277,9 +272,9 @@ pub async fn add_multiple_sets_to_workout(
 
     let new_sets: Vec<NewWorkoutSet> = (0..set_count)
         .map(|i| NewWorkoutSet {
-            session_id: *session_id,
-            exercise_id: *exercise_id,
-            request_string_id: *request_string_id,
+            session_id: session_id.clone(),
+            exercise_id: exercise_id.clone(),
+            request_string_id: request_string_id.clone(),
             weight: *weight,
             reps: *reps,
             set_index: starting_index + i,
@@ -290,42 +285,36 @@ pub async fn add_multiple_sets_to_workout(
 
     let created = diesel::insert_into(workout_sets::table)
         .values(&new_sets)
-        .get_results::<WorkoutSet>(&mut conn)
-        .await
+        .get_results::<WorkoutSet>(&mut *conn)
         .map_err(anyhow::Error::from)?;
 
     Ok(created)
 }
 
-pub async fn get_sets_for_session(session_id: Uuid) -> Result<Vec<WorkoutSet>> {
-    let mut conn = get_conn().await;
+pub async fn get_sets_for_session(session_id: i32) -> Result<Vec<WorkoutSet>> {
+    let mut conn = get_conn().await.lock().await;
     workout_sets::table
         .filter(workout_sets::session_id.eq(session_id))
         .order_by(workout_sets::set_index.asc())
-        .load::<WorkoutSet>(&mut conn)
-        .await
+        .load::<WorkoutSet>(&mut *conn)
         .map_err(Into::into)
 }
 
-pub async fn update_workout_set(set_id: Uuid, update: &UpdateWorkoutSet) -> Result<WorkoutSet> {
-    let mut conn = get_conn().await;
+pub async fn update_workout_set(set_id: i32, update: &UpdateWorkoutSet) -> Result<WorkoutSet> {
+    let mut conn = get_conn().await.lock().await;
     diesel::update(workout_sets::table.find(set_id))
         .set(update)
-        .get_result::<WorkoutSet>(&mut conn)
-        .await
+        .get_result::<WorkoutSet>(&mut *conn)
         .map_err(Into::into)
 }
 
-pub async fn update_workout_set_from_parsed(
-    set_id: Uuid,
-    parsed: &ParsedSet,
-) -> Result<WorkoutSet> {
-    let mut conn = get_conn().await;
+pub async fn update_workout_set_from_parsed(set_id: i32, parsed: &ParsedSet) -> Result<WorkoutSet> {
+    let mut conn = get_conn().await.lock().await;
 
     let original = workout_sets::table
         .find(set_id)
-        .first::<WorkoutSet>(&mut conn)
-        .await?;
+        .first::<WorkoutSet>(&mut *conn)
+        .map_err(anyhow::Error::from)?;
 
     let exercise_id_opt = if !parsed.exercise.is_empty() {
         let exercise = get_or_create_exercise(&parsed.exercise).await?;
@@ -342,7 +331,7 @@ pub async fn update_workout_set_from_parsed(
     let rpe_opt = parsed.rpe;
 
     let update = UpdateWorkoutSet {
-        session_id: None, 
+        session_id: None,
         exercise_id: exercise_id_opt,
         request_string_id: None,
         weight: weight_opt,
@@ -354,15 +343,13 @@ pub async fn update_workout_set_from_parsed(
 
     diesel::update(workout_sets::table.find(set_id))
         .set(&update)
-        .get_result::<WorkoutSet>(&mut conn)
-        .await
-        .map_err(Into::into)
+        .get_result::<WorkoutSet>(&mut *conn)
+        .map_err(anyhow::Error::from)
 }
 
-pub async fn delete_workout_set(set_id: Uuid) -> Result<usize> {
-    let mut conn = get_conn().await;
+pub async fn delete_workout_set(set_id: i32) -> Result<usize> {
+    let mut conn = get_conn().await.lock().await;
     diesel::delete(workout_sets::table.find(set_id))
-        .execute(&mut conn)
-        .await
+        .execute(&mut *conn)
         .map_err(Into::into)
 }

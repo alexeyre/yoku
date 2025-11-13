@@ -40,21 +40,21 @@ enum Commands {
     },
 
     Delete {
-        id: String,
+        id: i32,
     },
 
     ListSets {
-        session_id: String,
+        session_id: i32,
     },
 
     AddSet {
-        session_id: String,
+        session_id: i32,
         #[arg(value_parser)]
         input: String,
     },
 
     DeleteSet {
-        set_id: String,
+        set_id: i32,
     },
 
     SuggestExerciseLinks {
@@ -140,9 +140,8 @@ async fn cmd_list() -> Result<()> {
         return Ok(());
     }
     for s in sessions {
-        let id = s.id;
         let name = s.name.unwrap_or_else(|| "(unnamed)".to_string());
-        println!("{}  —  {}", id, name);
+        println!("{}  —  {}", s.id, name);
     }
     Ok(())
 }
@@ -158,35 +157,32 @@ async fn cmd_create(name: Option<String>) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_delete(id: &str) -> Result<()> {
-    let uuid = Uuid::from_str(id)?;
-    let deleted = delete_workout_session(uuid).await?;
-    println!("Deleted {} rows for session {}", deleted, uuid);
+async fn cmd_delete(id: &i32) -> Result<()> {
+    // Parse the provided UUID string and pass its 16-byte representation to the DB layer.
+    let deleted = delete_workout_session(*id).await?;
+    println!("Deleted {} rows for session {}", deleted, id);
     Ok(())
 }
 
-async fn cmd_list_sets(session_id: &str) -> Result<()> {
-    let uuid = Uuid::from_str(session_id)?;
-    let sets = get_sets_for_session(uuid).await?;
+async fn cmd_list_sets(session_id: &i32) -> Result<()> {
+    // Parse into a Uuid then convert to 16-byte Vec<u8> for DB calls
+    let sets = get_sets_for_session(*session_id).await?;
     if sets.is_empty() {
-        println!("No sets for session {}", uuid);
+        println!("No sets for session {}", session_id);
         return Ok(());
     }
     for s in sets {
-        // get exercise name for display
-        let exercise = get_exercise(&s.exercise_id).await?;
+        // s.exercise_id is Vec<u8>, clone and pass to get_exercise
+        let exercise = get_exercise(s.exercise_id.clone()).await?;
         let display = DisplayableSet::new(s, exercise.name);
         println!("{}", display);
     }
     Ok(())
 }
 
-async fn cmd_add_set(session_id: &str, input: &str, parser: LlmInterface) -> Result<()> {
-    let session_uuid = Uuid::from_str(session_id)?;
-
-    // Build a client-side Session and attach the workout id
-    let mut sess = Session::new_blank().await;
-    sess.set_workout_id(session_uuid).await?;
+async fn cmd_add_set(session_id: &i32, input: &str, parser: LlmInterface) -> Result<()> {
+    let sess = Session::new_blank().await;
+    sess.set_workout_id(*session_id).await?;
 
     // Fetch known exercises to help the parser be consistent
     let exercises = get_all_exercises().await?;
@@ -205,14 +201,13 @@ async fn cmd_add_set(session_id: &str, input: &str, parser: LlmInterface) -> Res
     // Let the session handle adding the set (it will create/get exercises as needed)
     sess.add_set_from_parsed(&parsed).await?;
 
-    println!("Added set to session {}: {}", session_uuid, parsed.exercise);
+    println!("Added set to session {}: {}", session_id, parsed.exercise);
     Ok(())
 }
 
-async fn cmd_delete_set(set_id: &str) -> Result<()> {
-    let uuid = Uuid::from_str(set_id)?;
-    let deleted = delete_workout_set(uuid).await?;
-    println!("Deleted {} rows for set {}", deleted, uuid);
+async fn cmd_delete_set(set_id: &i32) -> Result<()> {
+    let deleted = delete_workout_set(*set_id).await?;
+    println!("Deleted {} rows for set {}", deleted, set_id);
     Ok(())
 }
 
