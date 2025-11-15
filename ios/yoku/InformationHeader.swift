@@ -60,11 +60,17 @@ struct InformationHeader: View {
                 Divider().frame(height: 12).opacity(0.15)
                 labeledValue("SETS", "\(totalSets)", mirrored: true)
             }
-            Divider().frame(height: 12).opacity(0.15)
+
+            // Optional: a very subtle hairline instead of a full divider
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 0.5)
         }
         .font(.system(.footnote, design: .monospaced))
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        // Reduced bottom padding to pull the summary closer
+        .padding(.top, 6)
+        .padding(.bottom, 2)
         .contentShape(Rectangle())
     }
 

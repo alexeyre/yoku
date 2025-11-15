@@ -17,6 +17,9 @@ struct SetList: View {
     private let chartHorizontalPadding: CGFloat = 12
     private let chartVerticalPadding: CGFloat = 6
 
+    // Local log center for the DevActivityLogView; replace with environment object if desired
+    @StateObject private var logCenter = LogCenter()
+
     var body: some View {
         let activeExercise = workoutState.activeExercise
         let activeSetIndex = workoutState.indexOfActiveSet(in: activeExercise)
@@ -119,6 +122,21 @@ struct SetList: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
+            }
+
+            // Suggestions section
+            Section {
+                ExerciseSuggestionsView()
+                    .environmentObject(workoutState)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6))
+                    .listRowBackground(Color.clear)
+            }
+
+            // Developer log section
+            Section {
+                DevActivityLogView(logCenter: logCenter)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6))
+                    .listRowBackground(Color.clear)
             }
         }
         .listStyle(.plain)
