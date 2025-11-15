@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		6AA7525E2EC5618B0030349A /* YokuUniffi in Frameworks */ = {isa = PBXBuildFile; productRef = 6AA7525D2EC5618B0030349A /* YokuUniffi */; };
+		6A3DF9E32EC9237B00359166 /* YokuUniffi in Frameworks */ = {isa = PBXBuildFile; productRef = 6A3DF9E22EC9237B00359166 /* YokuUniffi */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,7 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				6AA7525E2EC5618B0030349A /* YokuUniffi in Frameworks */,
+				6A3DF9E32EC9237B00359166 /* YokuUniffi in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +71,7 @@
 			name = yoku;
 			packageProductDependencies = (
 				6AA7525D2EC5618B0030349A /* YokuUniffi */,
+				6A3DF9E22EC9237B00359166 /* YokuUniffi */,
 			);
 			productName = yoku;
 			productReference = 6AD81CDD2EC4DD5600549F4D /* yoku.app */;
@@ -101,7 +102,7 @@
 			mainGroup = 6AD81CD42EC4DD5600549F4D;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				6AA7525C2EC5618B0030349A /* XCLocalSwiftPackageReference "../yoku-uniffi/YokuUniffi" */,
+				6A3DF9E12EC9237B00359166 /* XCLocalSwiftPackageReference "../yoku-core/YokuUniffi" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 6AD81CDE2EC4DD5600549F4D /* Products */;
@@ -345,13 +346,17 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		6AA7525C2EC5618B0030349A /* XCLocalSwiftPackageReference "../yoku-uniffi/YokuUniffi" */ = {
+		6A3DF9E12EC9237B00359166 /* XCLocalSwiftPackageReference "../yoku-core/YokuUniffi" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../yoku-uniffi/YokuUniffi";
+			relativePath = "../yoku-core/YokuUniffi";
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		6A3DF9E22EC9237B00359166 /* YokuUniffi */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = YokuUniffi;
+		};
 		6AA7525D2EC5618B0030349A /* YokuUniffi */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = YokuUniffi;

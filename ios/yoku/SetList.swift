@@ -17,9 +17,6 @@ struct SetList: View {
     private let chartHorizontalPadding: CGFloat = 12
     private let chartVerticalPadding: CGFloat = 6
 
-    // Use the global shared LogCenter so it matches postFrontendLog(_:)
-    // Remove the local @StateObject to avoid a separate instance.
-    private var logCenter: LogCenter { sharedLogCenter }
 
     var body: some View {
         let activeExercise = workoutState.activeExercise
@@ -129,13 +126,6 @@ struct SetList: View {
             Section {
                 ExerciseSuggestionsView()
                     .environmentObject(workoutState)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6))
-                    .listRowBackground(Color.clear)
-            }
-
-            // Developer log section
-            Section {
-                DevActivityLogView(logCenter: logCenter)
                     .listRowInsets(EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6))
                     .listRowBackground(Color.clear)
             }

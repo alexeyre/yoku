@@ -54,7 +54,7 @@ struct yokuApp: App {
                     let dbPath = dbURL.path
 
                     // Initialize the database before showing the main UI
-                    await setupDatabase(path: dbPath)
+                    await try setupDatabase(path: dbPath)
 
                     // Mark ready
                     isDatabaseReady = true

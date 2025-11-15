@@ -35,8 +35,7 @@ struct ContentView: View {
         }
         .environmentObject(workoutState)
         .task {
-            let newWorkout = await startBlankWorkout()
-            postFrontendLog("Front end got a blank workout \(newWorkout)")
+            workoutState.startTimer()
         }
     }
 

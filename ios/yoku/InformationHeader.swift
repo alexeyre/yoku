@@ -13,7 +13,13 @@ struct InformationHeader: View {
 
     // Statically-provided items (still local)
     let workoutName: String = "FULL BODY A"
-    let dateString: String = "2025-11-13 18:42"
+    var dateString: String {
+        // return today's date
+        let date = Date()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
 
     var elapsedString: String {
         let seconds = Int(workoutState.elapsedTime)
