@@ -17,8 +17,9 @@ struct SetList: View {
     private let chartHorizontalPadding: CGFloat = 12
     private let chartVerticalPadding: CGFloat = 6
 
-    // Local log center for the DevActivityLogView; replace with environment object if desired
-    @StateObject private var logCenter = LogCenter()
+    // Use the global shared LogCenter so it matches postFrontendLog(_:)
+    // Remove the local @StateObject to avoid a separate instance.
+    private var logCenter: LogCenter { sharedLogCenter }
 
     var body: some View {
         let activeExercise = workoutState.activeExercise

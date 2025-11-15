@@ -34,6 +34,10 @@ struct ContentView: View {
             .frame(maxHeight: .infinity, alignment: .bottom)
         }
         .environmentObject(workoutState)
+        .task {
+            let newWorkout = await startBlankWorkout()
+            postFrontendLog("Front end got a blank workout \(newWorkout)")
+        }
     }
 
     // Tune these constants to match your actual header/input sizes if needed.

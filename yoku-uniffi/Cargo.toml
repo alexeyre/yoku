@@ -14,6 +14,4 @@ uniffi = "0.29"
 yoku-core = { path = "../yoku-core" }
 cargo-swift = "0.9.0"
 anyhow = "1.0.100"
-
-[build-dependencies]
-cargo-swift = "0.9.0"
+tokio = { version = "1.48.0", features = ["rt-multi-thread"] }
