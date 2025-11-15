@@ -44,7 +44,7 @@
 
             buildInputs = with pkgs; [
               openssl
-              postgresql
+              sqlite
             ];
 
             cargoBuildFlags = [
@@ -68,19 +68,15 @@
       devShells = forAllSystems (
         system: pkgs: {
           default = pkgs.mkShell {
-            nativeBuildInputs = with pkgs; [ postgresql ];
-            buildInputs = with pkgs; [ diesel-cli rustc cargo neo4j ];
+            buildInputs = with pkgs; [
+              diesel-cli
+              rustc
+              cargo
+              neo4j
+              sqlite
+            ];
 
             shellHook = ''
-              export PGDATA=$(mktemp -d)
-              export DATABASE_URL=postgres://postgres:postgres@localhost:5432/dev_db
-
-              echo "Starting temporary PostgreSQL in $PGDATA..."
-              initdb --username=postgres > /dev/null
-              pg_ctl -o "-F -p 5432" -D $PGDATA start > /dev/null
-              createdb -U postgres dev_db
-              echo "PostgreSQL running — DATABASE_URL=$DATABASE_URL"
-
               echo "Starting Neo4j (ephemeral)..."
               export NEO4J_TMP=$(mktemp -d)
               export NEO4J_HOME="$NEO4J_TMP"
@@ -99,9 +95,6 @@
               diesel migration run || true
 
               cleanup() {
-                echo "Stopping Postgres..."
-                pg_ctl -D $PGDATA stop > /dev/null || true
-                rm -rf "$PGDATA"
                 kill $NEO4J_PID >/dev/null 2>&1 || true
                 rm -rf "$NEO4J_TMP"
               }
