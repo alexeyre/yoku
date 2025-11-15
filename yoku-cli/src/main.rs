@@ -2,8 +2,6 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use dotenvy::dotenv;
 use std::fmt;
-use std::str::FromStr;
-use uuid::Uuid;
 
 use yoku_core::db::models::DisplayableSet;
 use yoku_core::db::operations::{

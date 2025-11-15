@@ -484,7 +484,6 @@ pub async fn generate_exercise_to_equipment_and_muscles(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[tokio::test]
     async fn mock_parse_examples() {
