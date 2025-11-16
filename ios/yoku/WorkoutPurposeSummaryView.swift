@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct WorkoutPurposeSummaryView: View {
-    @EnvironmentObject var workoutState: WorkoutState
+    @EnvironmentObject var workoutState: Session
     @State private var summary: String = "Analyzing workout…"
 
     var body: some View {
@@ -61,5 +61,5 @@ struct WorkoutPurposeSummaryView: View {
 #Preview {
     WorkoutPurposeSummaryView()
         .preferredColorScheme(.dark)
-        .environmentObject(WorkoutState())
+        .environmentObject(Session())
 }

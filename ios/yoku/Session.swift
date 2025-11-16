@@ -1,59 +1,45 @@
 import SwiftUI
 import Combine
-
+import YokuUniffi
 // Shared models used by views
-struct Exercise: Identifiable, Hashable {
+
+
+struct ExerciseModel: Identifiable, Hashable {
     let id: UUID = UUID()
     var name: String
-    var sets: [ExerciseSet]
+    var sets: [ExerciseSetModel]
 }
-
-struct ExerciseSet: Identifiable, Hashable {
+struct ExerciseSetModel: Identifiable, Hashable {
     let id: UUID = UUID()
     var label: String
 }
 
-final class WorkoutState: ObservableObject {
+final class Session: ObservableObject {
     // Published application state
-    @Published var exercises: [Exercise] = [
-        Exercise(name: "Deadlift", sets: [
-            ExerciseSet(label: "Set 1: 5 reps"),
-            ExerciseSet(label: "Set 2: 5 reps"),
-            ExerciseSet(label: "Set 3: 5 reps")
-        ]),
-        Exercise(name: "Bench Press", sets: [
-            ExerciseSet(label: "Set 1: 8 reps"),
-            ExerciseSet(label: "Set 2: 8 reps"),
-            ExerciseSet(label: "Set 3: 6 reps")
-        ]),
-        Exercise(name: "Pull-Up", sets: [
-            ExerciseSet(label: "Set 1: 10 reps"),
-            ExerciseSet(label: "Set 2: 8 reps"),
-            ExerciseSet(label: "Set 3: 6 reps")
-        ]),
-        Exercise(name: "Squat", sets: [
-            ExerciseSet(label: "Set 1: 5 reps"),
-            ExerciseSet(label: "Set 2: 5 reps"),
-            ExerciseSet(label: "Set 3: 5 reps")
-        ]),
-        Exercise(name: "Overhead Press", sets: [
-            ExerciseSet(label: "Set 1: 8 reps"),
-            ExerciseSet(label: "Set 2: 6 reps"),
-            ExerciseSet(label: "Set 3: 6 reps")
-        ])
-    ]
+    @Published var exercises: [ExerciseModel] = [];
 
     @Published var expanded: Set<UUID> = []
     @Published var activeExerciseID: UUID?
     @Published var activeSetID: UUID?
+    
+    // Make the backing session optional until async setup completes
+    @Published var session: YokuUniffi.Session?
 
     // Simple elapsed time tracking (seconds)
     @Published var elapsedTime: TimeInterval = 0
 
     private var timerCancellable: AnyCancellable?
 
+    // Keep initializer synchronous and non-throwing for @StateObject and previews
     init() {
         initializeActiveSelectionIfNeeded()
+    }
+
+    // Call this from a View .task to initialize the backend session
+    @MainActor
+    func setup(dbPath: String, model: String) async throws {
+        let created = try await YokuUniffi.createSession(dbPath: dbPath, model: model)
+        self.session = created
     }
 
     // MARK: - Timer control
@@ -73,22 +59,22 @@ final class WorkoutState: ObservableObject {
     }
 
     // MARK: - Convenience accessors
-    var activeExercise: Exercise? {
+    var activeExercise: ExerciseModel? {
         guard let id = activeExerciseID else { return nil }
         return exercises.first { $0.id == id }
     }
 
-    func indexOfActiveSet(in exercise: Exercise?) -> Int? {
+    func indexOfActiveSet(in exercise: ExerciseModel?) -> Int? {
         guard let exercise = exercise, let active = activeSetID else { return nil }
         return exercise.sets.firstIndex { $0.id == active }
     }
 
     // MARK: - Expansion and selection helpers
-    func isExpanded(_ exercise: Exercise) -> Bool {
+    func isExpanded(_ exercise: ExerciseModel) -> Bool {
         expanded.contains(exercise.id)
     }
 
-    func toggle(expansionFor exercise: Exercise, expandIfCollapsed: Bool = false) {
+    func toggle(expansionFor exercise: ExerciseModel, expandIfCollapsed: Bool = false) {
         if expanded.contains(exercise.id) {
             expanded.remove(exercise.id)
         } else if expandIfCollapsed {
@@ -96,7 +82,7 @@ final class WorkoutState: ObservableObject {
         }
     }
 
-    func setActiveExercise(_ exercise: Exercise) {
+    func setActiveExercise(_ exercise: ExerciseModel) {
         activeExerciseID = exercise.id
         if !(exercise.sets.contains { $0.id == activeSetID }) {
             activeSetID = exercise.sets.first?.id
@@ -114,7 +100,7 @@ final class WorkoutState: ObservableObject {
 
     // MARK: - Dummy data series generator for charts
     // Returns a small series of integers representing e.g. reps or weights
-    func dataSeries(for exercise: Exercise?) -> [Int] {
+    func dataSeries(for exercise: ExerciseModel?) -> [Int] {
         guard let exercise else { return [] }
         let lower = exercise.name.lowercased()
         if lower.contains("deadlift") {

@@ -9,7 +9,7 @@ import SwiftUI
 
 struct InformationHeader: View {
     // Read values from the shared WorkoutState
-    @EnvironmentObject var workoutState: WorkoutState
+    @EnvironmentObject var workoutState: Session
 
     // Statically-provided items (still local)
     let workoutName: String = "FULL BODY A"
@@ -102,5 +102,5 @@ struct InformationHeader: View {
 #Preview {
     InformationHeader()
         .preferredColorScheme(.dark)
-        .environmentObject(WorkoutState())
+        .environmentObject(Session())
 }

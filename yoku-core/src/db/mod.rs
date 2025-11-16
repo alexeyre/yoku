@@ -43,6 +43,12 @@ pub async fn get_conn() -> &'static Mutex<SqliteConnection> {
         .await
 }
 
+pub async fn get_conn_from_uri(uri: &str) -> Result<SqliteConnection> {
+    let conn = SqliteConnection::establish(uri)
+        .map_err(|e| anyhow::anyhow!("Failed to connect to database: {e}"))?;
+    Ok(conn)
+}
+
 pub fn is_database_initialized() -> bool {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let conn = SqliteConnection::establish(&database_url);

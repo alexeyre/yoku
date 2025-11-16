@@ -10,6 +10,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::OnceCell;
 use tokio::time::sleep;
 
+use log::{debug, error, info, warn};
+
 fn deserialize_reps<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
 where
     D: Deserializer<'de>,
@@ -74,9 +76,16 @@ fn strip_code_fences(s: &str) -> &str {
 type MockFn = Arc<dyn Fn(&str, &str) -> String + Send + Sync>;
 
 enum LlmBackend {
-    OpenAi { model: String },
-    Ollama { model: String },
-    Mock { responder: MockFn },
+    OpenAi {
+        model: String,
+        api_key: Option<String>,
+    },
+    Ollama {
+        model: String,
+    },
+    Mock {
+        responder: MockFn,
+    },
 }
 
 pub struct LlmInterface {
@@ -90,21 +99,24 @@ static OLLAMA_CLIENT: OnceCell<Arc<ollama_rs::Ollama>> = OnceCell::const_new();
 const OLLAMA_DEFAULT_MODEL: &str = "llama3.2:3b";
 
 impl LlmInterface {
-    pub async fn new_openai(model: Option<String>) -> Result<Self> {
+    pub async fn new_openai(api_key: Option<String>, model: Option<String>) -> Result<Self> {
         let model = model.unwrap_or_else(|| OPENAI_DEFAULT_MODEL.to_string());
+        info!("LlmInterface::new_openai selected model={}", model);
         Ok(Self {
-            backend: LlmBackend::OpenAi { model },
+            backend: LlmBackend::OpenAi { model, api_key },
         })
     }
 
     pub async fn new_ollama(model: Option<String>) -> Result<Self> {
         let model = model.unwrap_or_else(|| OLLAMA_DEFAULT_MODEL.to_string());
+        info!("LlmInterface::new_ollama selected model={}", model);
         Ok(Self {
             backend: LlmBackend::Ollama { model },
         })
     }
 
     pub fn new_mock_fn(f: impl Fn(&str, &str) -> String + Send + Sync + 'static) -> Self {
+        debug!("LlmInterface::new_mock_fn creating mock backend");
         Self {
             backend: LlmBackend::Mock {
                 responder: Arc::new(f),
@@ -113,6 +125,10 @@ impl LlmInterface {
     }
 
     pub fn new_mock_map(map: HashMap<String, String>) -> Self {
+        debug!(
+            "LlmInterface::new_mock_map creating mock map backend with {} entries",
+            map.len()
+        );
         let m = Arc::new(map);
         Self::new_mock_fn(move |system, user| {
             let key = format!("{}\n--\n{}", system, user);
@@ -123,14 +139,30 @@ impl LlmInterface {
         })
     }
 
-    async fn get_openai_creds() -> Result<Credentials> {
+    async fn get_openai_creds(api_key: &Option<String>) -> Result<Credentials> {
+        debug!(
+            "LlmInterface::get_openai_creds called; api_key provided={}",
+            api_key.is_some()
+        );
         Ok(OPENAI_CREDS
-            .get_or_init(|| async { Credentials::from_env() })
+            .get_or_init(|| async {
+                match api_key {
+                    Some(key) => {
+                        debug!("LlmInterface::get_openai_creds using provided API key");
+                        Credentials::new(key, "")
+                    }
+                    None => {
+                        debug!("LlmInterface::get_openai_creds loading from env");
+                        Credentials::from_env()
+                    }
+                }
+            })
             .await
             .clone())
     }
 
     async fn get_ollama_client() -> Result<Arc<ollama_rs::Ollama>> {
+        debug!("LlmInterface::get_ollama_client called");
         Ok(OLLAMA_CLIENT
             .get_or_init(|| async { Arc::new(ollama_rs::Ollama::default()) })
             .await
@@ -138,9 +170,23 @@ impl LlmInterface {
     }
 
     pub async fn call(&self, system: &str, user: &str) -> Result<String> {
+        debug!(
+            "LlmInterface::call invoked backend={}",
+            match &self.backend {
+                LlmBackend::OpenAi { model, .. } => format!("openai({})", model),
+                LlmBackend::Ollama { model } => format!("ollama({})", model),
+                LlmBackend::Mock { .. } => "mock".to_string(),
+            }
+        );
+
         match &self.backend {
-            LlmBackend::OpenAi { model } => {
-                let creds = Self::get_openai_creds().await?;
+            LlmBackend::OpenAi { model, api_key } => {
+                debug!(
+                    "OpenAI call using model={} api_key_present={}",
+                    model,
+                    api_key.is_some()
+                );
+                let creds = Self::get_openai_creds(api_key).await?;
                 let messages = vec![
                     ChatCompletionMessage {
                         role: ChatCompletionMessageRole::System,
@@ -163,7 +209,11 @@ impl LlmInterface {
                     .response_format(ChatCompletionResponseFormat::json_object())
                     .credentials(creds.clone())
                     .create()
-                    .await?;
+                    .await
+                    .map_err(|e| {
+                        error!("OpenAI ChatCompletion.create() failed: {}", e);
+                        e
+                    })?;
                 let result_message = result_completion
                     .choices
                     .first()
@@ -175,9 +225,11 @@ impl LlmInterface {
                     .unwrap_or_else(|| "".to_string())
                     .trim()
                     .to_string();
+                debug!("OpenAI response length={}", content.len());
                 Ok(content)
             }
             LlmBackend::Ollama { model } => {
+                debug!("Ollama call using model={}", model);
                 let client = Self::get_ollama_client().await?;
                 let options = ollama_rs::models::ModelOptions::default().temperature(0.001);
                 let res = client
@@ -195,11 +247,18 @@ impl LlmInterface {
                             },
                         ),
                     )
-                    .await?;
+                    .await
+                    .map_err(|e| {
+                        error!("Ollama generate failed: {}", e);
+                        e
+                    })?;
+                debug!("Ollama response length={}", res.response.len());
                 Ok(res.response.trim().to_string())
             }
             LlmBackend::Mock { responder } => {
+                debug!("Mock LLM responder invoked");
                 let r = responder(system, user);
+                debug!("Mock response length={}", r.len());
                 Ok(r.trim().to_string())
             }
         }
@@ -209,10 +268,18 @@ impl LlmInterface {
     where
         T: DeserializeOwned,
     {
+        debug!("call_json invoked; user_input_len={}", user.len());
         let raw = self.call(system, user).await?;
+        debug!("raw LLM output len={}", raw.len());
         let stripped = strip_code_fences(&raw);
-        let parsed: T = serde_json::from_str(stripped)
-            .map_err(|e| anyhow!("Cannot parse LLM JSON output: {}\nError: {}", stripped, e))?;
+        let parsed: T = serde_json::from_str(stripped).map_err(|e| {
+            error!("Cannot parse LLM JSON output: {} -- error: {}", stripped, e);
+            anyhow!(format!(
+                "Cannot parse LLM JSON output: {}\nError: {}",
+                stripped, e
+            ))
+        })?;
+        debug!("call_json parsed successfully");
         Ok(parsed)
     }
 
@@ -229,10 +296,19 @@ impl LlmInterface {
         let mut attempt: usize = 0;
         loop {
             attempt += 1;
+            debug!(
+                "call_with_retry attempt={} max_attempts={}",
+                attempt, max_attempts
+            );
             match self.call(system, user).await {
-                Ok(s) => return Ok(s),
+                Ok(s) => {
+                    debug!("call_with_retry succeeded on attempt={}", attempt);
+                    return Ok(s);
+                }
                 Err(e) => {
+                    warn!("call failed on attempt {}: {}", attempt, e);
                     if attempt >= max_attempts {
+                        error!("call_with_retry exhausted attempts={}", attempt);
                         return Err(e);
                     }
                     let cap_shift = ((attempt - 1) as u32).min(20);
@@ -246,6 +322,10 @@ impl LlmInterface {
                     } else {
                         total_ms as u64
                     };
+                    debug!(
+                        "call_with_retry sleeping ms={} before next attempt",
+                        sleep_ms
+                    );
                     sleep(Duration::from_millis(sleep_ms)).await;
                     continue;
                 }
@@ -310,6 +390,12 @@ pub struct PromptBuilder {
 
 impl PromptBuilder {
     pub fn new(ctx: PromptContext) -> Self {
+        debug!(
+            "PromptBuilder::new created with known_exercises={} known_equipment={} known_muscles={}",
+            ctx.known_exercises.len(),
+            ctx.known_equipment.len(),
+            ctx.known_muscles.len()
+        );
         Self { ctx }
     }
 
@@ -329,6 +415,7 @@ impl PromptBuilder {
             ));
             count += 1;
         }
+        debug!("examples_block_for_parse returning {} examples", count);
         block
     }
 
@@ -349,6 +436,10 @@ impl PromptBuilder {
             ));
             count += 1;
         }
+        debug!(
+            "examples_block_for_equipment_links returning {} examples",
+            count
+        );
         block
     }
 
@@ -368,6 +459,10 @@ impl PromptBuilder {
             ));
             count += 1;
         }
+        debug!(
+            "examples_block_for_exercise_links returning {} examples",
+            count
+        );
         block
     }
 
@@ -446,10 +541,15 @@ pub async fn parse_set_string(
     builder: &PromptBuilder,
     input: &str,
 ) -> Result<ParsedSet> {
+    debug!("parse_set_string called input_len={}", input.len());
     let system_prompt = builder.system_parse_prompt();
     let user_prompt = builder.user_parse_prompt(input);
     let mut parsed: ParsedSet = llm.call_json(&system_prompt, &user_prompt).await?;
     parsed = ParsedSet::with_original(parsed, input.to_string());
+    info!(
+        "parse_set_string parsed exercise='{}' reps={:?} rpe={:?}",
+        parsed.exercise, parsed.reps, parsed.rpe
+    );
     Ok(parsed)
 }
 
@@ -458,9 +558,17 @@ pub async fn generate_equipment_to_exercise_links(
     builder: &PromptBuilder,
     equipment: &str,
 ) -> Result<Vec<String>> {
+    debug!(
+        "generate_equipment_to_exercise_links called equipment='{}'",
+        equipment
+    );
     let system = builder.system_link_prompt(LinkKind::EquipmentToExercises);
     let user = builder.user_link_prompt_equipment(equipment);
     let res: Vec<String> = llm.call_json(&system, &user).await?;
+    info!(
+        "generate_equipment_to_exercise_links returned {} suggestions",
+        res.len()
+    );
     Ok(res)
 }
 
@@ -469,6 +577,10 @@ pub async fn generate_exercise_to_equipment_and_muscles(
     builder: &PromptBuilder,
     exercise: &str,
 ) -> Result<(Vec<String>, Vec<(String, String, f32)>, Vec<String>)> {
+    debug!(
+        "generate_exercise_to_equipment_and_muscles called exercise='{}'",
+        exercise
+    );
     let system = builder.system_link_prompt(LinkKind::ExerciseToEquipmentMusclesVariants);
     let user = builder.user_link_prompt_exercise(exercise);
     #[derive(Deserialize)]
@@ -478,6 +590,12 @@ pub async fn generate_exercise_to_equipment_and_muscles(
         related_exercises: Vec<String>,
     }
     let res: ResShape = llm.call_json(&system, &user).await?;
+    info!(
+        "generate_exercise_to_equipment_and_muscles parsed equipment={} muscles={} related_exercises={}",
+        res.equipment.len(),
+        res.muscles.len(),
+        res.related_exercises.len()
+    );
     Ok((res.equipment, res.muscles, res.related_exercises))
 }
 

@@ -9,7 +9,7 @@ struct ExerciseSuggestion: Identifiable, Hashable {
 }
 
 struct ExerciseSuggestionsView: View {
-    @EnvironmentObject var workoutState: WorkoutState
+    @EnvironmentObject var workoutState: Session
 
     private func suggestions() -> [ExerciseSuggestion] {
         guard let exercise = workoutState.activeExercise else {
@@ -114,5 +114,5 @@ struct ExerciseSuggestionsView: View {
 #Preview {
     ExerciseSuggestionsView()
         .preferredColorScheme(.dark)
-        .environmentObject(WorkoutState())
+        .environmentObject(Session())
 }

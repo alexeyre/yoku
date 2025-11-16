@@ -2,7 +2,7 @@ import SwiftUI
 import YokuUniffi
 
 struct ContentView: View {
-    @StateObject private var workoutState = WorkoutState()
+    @EnvironmentObject var session: Session
     var body: some View {
         ZStack {
             // Middle content: keep List as-is, just inset it to avoid header/input bar
@@ -17,7 +17,6 @@ struct ContentView: View {
                     .padding(0)
                 // New: one-line LLM summary below the header
                 WorkoutPurposeSummaryView()
-                    .environmentObject(workoutState)
                     .padding(.horizontal, 12)
                     .padding(.bottom, 6)
                     .background(Color(.systemBackground))
@@ -33,15 +32,12 @@ struct ContentView: View {
             }
             .frame(maxHeight: .infinity, alignment: .bottom)
         }
-        .environmentObject(workoutState)
-        .task {
-            workoutState.startTimer()
-        }
+        .environmentObject(session)
     }
 
     // Tune these constants to match your actual header/input sizes if needed.
-    private var headerHeight: CGFloat { 60 }     // approximate InformationHeader height
-    private var summaryHeight: CGFloat { 34 }    // approximate one-line summary height
+    private var headerHeight: CGFloat { 50 }     // approximate InformationHeader height
+    private var summaryHeight: CGFloat { 30 }    // approximate one-line summary height
     private var inputBarHeight: CGFloat { 56 }   // approximate CommandInputBar height including padding
 }
 

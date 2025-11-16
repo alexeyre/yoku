@@ -1,70 +1,96 @@
-use anyhow::Result;
-use tokio::sync::Mutex;
-
 use crate::db::operations::{
     add_multiple_sets_to_workout, add_workout_set, create_request_string_for_username,
-    create_workout_session, get_or_create_exercise, get_workout_session,
+    create_workout_session, get_or_create_exercise, get_sets_for_session, get_workout_session,
     update_workout_set_from_parsed,
 };
-use crate::llm::ParsedSet;
+use crate::llm::{LlmInterface, ParsedSet};
+use anyhow::Result;
+use diesel::SqliteConnection;
+use tokio::sync::Mutex;
 
-/// Session holds a mutable optional active workout id for CLI flows.
-/// Workout ids are stored as 16-byte UUID bytes (`i32`).
+#[derive(uniffi::Object)]
 pub struct Session {
     pub workout_id: Mutex<Option<i32>>,
+    pub db_conn: Mutex<SqliteConnection>,
+    pub llm_backend: Mutex<LlmInterface>,
+}
+
+const fn get_openai_api_key() -> &'static str {
+    dotenv!("OPENAI_KEY")
 }
 
 impl Session {
-    /// Create a new blank session (no active workout).
-    pub async fn new_blank() -> Self {
-        Self {
+    pub async fn new(db_path: &str, model: String) -> Result<Self> {
+        let conn = crate::db::get_conn_from_uri(db_path).await?;
+        let llm_backend =
+            LlmInterface::new_openai(Some(get_openai_api_key().to_string()), Some(model)).await?;
+        Ok(Self {
             workout_id: Mutex::new(None),
-        }
+            db_conn: Mutex::new(conn),
+            llm_backend: Mutex::new(llm_backend),
+        })
     }
 
-    /// Set the active workout id for this session.
-    /// Validates the id exists in the DB by calling `get_workout_session`.
     pub async fn set_workout_id(&self, workout_id: i32) -> Result<()> {
-        // Validate the session exists (will return Err if not found)
-        let _ = get_workout_session(workout_id.clone()).await?;
+        let mut db_conn = self.db_conn.lock().await;
+        let _ = get_workout_session(&mut *db_conn, workout_id).await?;
         *self.workout_id.lock().await = Some(workout_id);
         Ok(())
     }
 
-    /// Create a new (empty) workout session and set it as the active workout.
     pub async fn new_workout(&self) -> Result<()> {
-        let workout = create_workout_session(None, None, None, None).await?;
-        // workout.id is i32
+        let mut db_conn = self.db_conn.lock().await;
+        let workout = create_workout_session(&mut *db_conn, None, None, None, None).await?;
         self.set_workout_id(workout.id).await
     }
 
-    /// Create a new workout session with the provided name and set it active.
     pub async fn new_workout_with_name(&self, name: &str) -> Result<()> {
-        let workout = create_workout_session(None, Some(name.into()), None, None).await?;
+        let mut db_conn = self.db_conn.lock().await;
+        let workout =
+            create_workout_session(&mut *db_conn, None, Some(name.into()), None, None).await?;
         self.set_workout_id(workout.id).await
     }
 
-    /// Return the currently active workout id (16-byte UUID bytes), if any.
     pub async fn get_workout_id(&self) -> Option<i32> {
         self.workout_id.lock().await.clone()
     }
 
-    /// Replace an existing set with parsed data. `set_id` is the 16-byte UUID bytes of the set.
     pub async fn replace_set_from_parsed(&self, set_id: i32, parsed: &ParsedSet) -> Result<()> {
-        update_workout_set_from_parsed(set_id, parsed).await?;
+        let mut db_conn = self.db_conn.lock().await;
+        update_workout_set_from_parsed(&mut *db_conn, set_id, parsed).await?;
         Ok(())
     }
 
-    /// Add a parsed set into the active workout session.
-    /// This will create/get the exercise and the request_string row as needed and then add one or more sets.
+    pub async fn get_all_sets(&self) -> Result<Vec<crate::db::models::WorkoutSet>> {
+        let workout_id = self.get_workout_id().await;
+        if let Some(workout_id) = workout_id {
+            let mut db_conn = self.db_conn.lock().await;
+            let sets = get_sets_for_session(&mut *db_conn, workout_id).await?;
+            Ok(sets)
+        } else {
+            Err(anyhow::anyhow!("No active workout"))
+        }
+    }
+
+    pub async fn add_set_from_string(&self, request_string: &str) -> Result<()> {
+        let ctx = crate::llm::PromptContext {
+            known_exercises: vec![],
+            ..Default::default()
+        };
+        let builder = crate::llm::PromptBuilder::new(ctx);
+        let backend = self.llm_backend.lock().await;
+        let parsed = crate::llm::parse_set_string(&backend, &builder, &request_string).await?;
+        self.add_set_from_parsed(&parsed).await
+    }
+
     pub async fn add_set_from_parsed(&self, parsed: &ParsedSet) -> Result<()> {
         let session_id = self
             .get_workout_id()
             .await
             .ok_or_else(|| anyhow::anyhow!("No active workout in session"))?;
 
-        // Ensure exercise exists (or create it)
-        let exercise = get_or_create_exercise(&parsed.exercise).await?;
+        let mut db_conn = self.db_conn.lock().await;
+        let exercise = get_or_create_exercise(&mut *db_conn, &parsed.exercise).await?;
 
         let weight = parsed.weight.unwrap_or(0.0);
         let reps = parsed.reps.unwrap_or(0);
@@ -81,11 +107,13 @@ impl Session {
             )
         };
 
-        let req = create_request_string_for_username("cli", request_str_content).await?;
+        let req =
+            create_request_string_for_username(&mut *db_conn, "cli", request_str_content).await?;
         let request_string_id = req.id;
 
         if set_count > 1 {
             add_multiple_sets_to_workout(
+                &mut *db_conn,
                 &session_id,
                 &exercise.id,
                 &request_string_id,
@@ -97,6 +125,7 @@ impl Session {
             .await?;
         } else {
             add_workout_set(
+                &mut *db_conn,
                 &session_id,
                 &exercise.id,
                 &request_string_id,

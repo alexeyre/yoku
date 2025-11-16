@@ -8,16 +8,21 @@
 import SwiftUI
 import YokuUniffi
 
+
 @main
 struct yokuApp: App {
     @State private var isDatabaseReady = false
     @State private var setupError: Error?
+    
+    @StateObject private var session = Session()
+    
 
     var body: some Scene {
         WindowGroup {
             Group {
                 if isDatabaseReady {
                     ContentView()
+                        .environmentObject(session)
                 } else if let error = setupError {
                     VStack(spacing: 12) {
                         Text("Failed to set up database")
@@ -42,6 +47,9 @@ struct yokuApp: App {
             .task {
                 // Build Application Support/yoku/app.db
                 do {
+                    //let rc = setenv("RUST_BACKTRACE", "1", 1)
+                    //YokuUniffi.setDebugLogLevel()
+                    
                     let appSupport = try FileManager.default.url(
                         for: .applicationSupportDirectory,
                         in: .userDomainMask,
@@ -52,10 +60,10 @@ struct yokuApp: App {
                     try FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
                     let dbURL = appDir.appendingPathComponent("app.db")
                     let dbPath = dbURL.path
-
-                    // Initialize the database before showing the main UI
-                    await try setupDatabase(path: dbPath)
-
+                    
+                    // Session.setup only takes dbPath per Session.swift
+                    try await session.setup(dbPath: dbPath, model: "gpt-5-mini")
+                    
                     // Mark ready
                     isDatabaseReady = true
                 } catch {

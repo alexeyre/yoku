@@ -10,7 +10,7 @@ import Charts
 
 struct SetList: View {
     // Use the shared WorkoutState instead of local state
-    @EnvironmentObject var workoutState: WorkoutState
+    @EnvironmentObject var workoutState: Session
 
     // Chart layout constants
     private let chartHeight: CGFloat = 132
@@ -206,5 +206,5 @@ struct SetList: View {
 #Preview {
     SetList()
         .preferredColorScheme(.dark)
-        .environmentObject(WorkoutState())
+        .environmentObject(Session())
 }
