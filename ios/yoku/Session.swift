@@ -10,11 +10,11 @@ import YokuUniffi
 
 struct ExerciseModel: Identifiable, Hashable {
     let id: UUID
-    let backendID: Int?
+    let backendID: Int64?
     var name: String
     var sets: [ExerciseSetModel]
 
-    init(id: UUID = UUID(), backendID: Int? = nil, name: String, sets: [ExerciseSetModel]) {
+    init(id: UUID = UUID(), backendID: Int64? = nil, name: String, sets: [ExerciseSetModel]) {
         self.id = id
         self.backendID = backendID
         self.name = name
@@ -24,12 +24,12 @@ struct ExerciseModel: Identifiable, Hashable {
 
 struct ExerciseSetModel: Identifiable, Hashable {
     let id: UUID
-    let backendID: Int?
+    let backendID: Int64?
     var label: String
-    let weight: Float
-    let reps: Int
+    let weight: Double
+    let reps: Int64
 
-    init(id: UUID = UUID(), backendID: Int? = nil, label: String, weight: Float, reps: Int) {
+    init(id: UUID = UUID(), backendID: Int64? = nil, label: String, weight: Double, reps: Int64) {
         self.id = id
         self.backendID = backendID
         self.label = label
@@ -76,12 +76,12 @@ final class Session: ObservableObject {
     @Published var lastError: Error?
 
     // New: lifts map keyed by backend exercise id
-    @Published private(set) var liftsByExerciseId: [Int: [Float]] = [:]
+    @Published private(set) var liftsByExerciseId: [Int64: [Double]] = [:]
 
     private let backend = BackendSessionCoordinator()
     private var timerCancellable: AnyCancellable?
-    private var exerciseIDMap: [Int: UUID] = [:]
-    private var setIDMap: [Int: UUID] = [:]
+    private var exerciseIDMap: [Int64: UUID] = [:]
+    private var setIDMap: [Int64: UUID] = [:]
 
     init() {}
 
@@ -109,9 +109,9 @@ final class Session: ObservableObject {
         }
     }
 
-    func setActiveWorkoutSessionId(_ id: Int) async throws {
+    func setActiveWorkoutSessionId(_ id: Int64) async throws {
         do {
-            let snapshot = try await backend.setActiveWorkoutSessionId(Int32(id))
+            let snapshot = try await backend.setActiveWorkoutSessionId(id)
             apply(snapshot: snapshot)
             lastError = nil
         } catch {
@@ -275,9 +275,9 @@ final class Session: ObservableObject {
             $0.name().localizedCaseInsensitiveCompare($1.name()) == .orderedAscending
         }
 
-        let setsGrouped = Dictionary(grouping: backendSets, by: { Int($0.exerciseId()) })
-        var nextExerciseMap: [Int: UUID] = [:]
-        var nextSetMap: [Int: UUID] = [:]
+        let setsGrouped = Dictionary(grouping: backendSets, by: { $0.exerciseId() })
+        var nextExerciseMap: [Int64: UUID] = [:]
+        var nextSetMap: [Int64: UUID] = [:]
         var models: [ExerciseModel] = []
 
         nextExerciseMap.reserveCapacity(sortedExercises.count)
@@ -285,7 +285,7 @@ final class Session: ObservableObject {
         models.reserveCapacity(sortedExercises.count)
 
         for exercise in sortedExercises {
-            let backendID = Int(exercise.id())
+            let backendID = exercise.id()
             let sets = setsGrouped[backendID] ?? []
             guard !sets.isEmpty else {
                 continue
@@ -295,12 +295,12 @@ final class Session: ObservableObject {
             nextExerciseMap[backendID] = exerciseUUID
 
             let setModels = sets.map { backendSet -> ExerciseSetModel in
-                let backendSetID = Int(backendSet.id())
+                let backendSetID = backendSet.id()
                 let setUUID = setIDMap[backendSetID] ?? UUID()
                 nextSetMap[backendSetID] = setUUID
                 let label = "Set \(backendSet.id())"
                 let weight = backendSet.weight()
-                let reps = Int(backendSet.reps())
+                let reps = backendSet.reps()
                 return ExerciseSetModel(
                     id: setUUID, backendID: backendSetID, label: label, weight: weight, reps: reps)
             }
@@ -409,7 +409,7 @@ private actor BackendSessionCoordinator {
         let workout: YokuUniffi.WorkoutSession?
         let exercises: [YokuUniffi.Exercise]
         let sets: [YokuUniffi.WorkoutSet]
-        let liftsByExerciseId: [Int: [Float]]
+        let liftsByExerciseId: [Int64: [Double]]
     }
 
     enum CoordinatorError: LocalizedError {
@@ -453,13 +453,13 @@ private actor BackendSessionCoordinator {
         return try await snapshot(for: session)
     }
 
-    func setActiveWorkoutSessionId(_ id: Int32) async throws -> Snapshot {
+    func setActiveWorkoutSessionId(_ id: Int64) async throws -> Snapshot {
         let session = try requireSession()
         try await YokuUniffi.setSessionWorkoutSessionId(session: session, id: id)
         return try await snapshot(for: session)
     }
 
-    func getLiftsForExercise(_ id: Int32) async throws -> [Float] {
+    func getLiftsForExercise(_ id: Int64) async throws -> [Double] {
         let session = try requireSession()
         return try await YokuUniffi.getLiftsForExercise(
             session: session, exerciseId: id, limit: 100)
@@ -492,14 +492,14 @@ private actor BackendSessionCoordinator {
         let sets = (try? await setsTask) ?? []
 
         // Concurrently fetch lifts for each exercise (best-effort)
-        let liftsByExerciseId: [Int: [Float]] = await withTaskGroup(of: (Int, [Float]?).self) {
+        let liftsByExerciseId: [Int64: [Double]] = await withTaskGroup(of: (Int64, [Double]?).self) {
             group in
             for ex in exercises {
-                let exId = Int(ex.id())
+                let exId = ex.id()
                 group.addTask {
                     do {
                         let lifts = try await YokuUniffi.getLiftsForExercise(
-                            session: session, exerciseId: Int32(exId), limit: 100)
+                            session: session, exerciseId: exId, limit: 100)
                         return (exId, lifts)
                     } catch {
                         return (exId, nil)
@@ -507,7 +507,7 @@ private actor BackendSessionCoordinator {
                 }
             }
 
-            var dict: [Int: [Float]] = [:]
+            var dict: [Int64: [Double]] = [:]
             for await (id, lifts) in group {
                 dict[id] = lifts ?? []
             }

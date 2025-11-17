@@ -5,13 +5,13 @@ use crate::db;
 
 #[derive(uniffi::Object)]
 pub struct Exercise {
-    id: u32,
+    id: i64,
     name: String,
 }
 
 #[uniffi::export]
 impl Exercise {
-    fn id(&self) -> u32 {
+    fn id(&self) -> i64 {
         self.id
     }
 
@@ -23,7 +23,7 @@ impl Exercise {
 impl From<db::models::Exercise> for Exercise {
     fn from(e: db::models::Exercise) -> Self {
         Exercise {
-            id: e.id as u32,
+            id: e.id,
             name: e.name,
         }
     }
@@ -31,7 +31,7 @@ impl From<db::models::Exercise> for Exercise {
 
 #[derive(uniffi::Object)]
 pub struct WorkoutSession {
-    pub id: i32,
+    pub id: i64,
     pub name: Option<String>,
     pub date: chrono::NaiveDateTime,
 }
@@ -39,7 +39,7 @@ pub struct WorkoutSession {
 #[uniffi::export]
 impl WorkoutSession {
     /// Return the session id.
-    fn id(&self) -> i32 {
+    fn id(&self) -> i64 {
         self.id
     }
 
@@ -84,31 +84,31 @@ impl From<db::models::WorkoutSession> for WorkoutSession {
 
 #[derive(uniffi::Object)]
 pub struct WorkoutSet {
-    pub id: i32,
-    pub exercise_id: i32,
-    pub weight: f32,
-    pub reps: i32,
+    pub id: i64,
+    pub exercise_id: i64,
+    pub weight: f64,
+    pub reps: i64,
 }
 
 #[uniffi::export]
 impl WorkoutSet {
     /// Return the set id.
-    fn id(&self) -> i32 {
+    fn id(&self) -> i64 {
         self.id
     }
 
     /// Return the associated exercise id.
-    fn exercise_id(&self) -> i32 {
+    fn exercise_id(&self) -> i64 {
         self.exercise_id
     }
 
     /// Return the weight of the set.
-    fn weight(&self) -> f32 {
+    fn weight(&self) -> f64 {
         self.weight
     }
 
     /// Return the number of reps in the set.
-    fn reps(&self) -> i32 {
+    fn reps(&self) -> i64 {
         self.reps
     }
 }

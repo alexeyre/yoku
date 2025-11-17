@@ -258,7 +258,7 @@ private struct RootView: View {
         selectionError = nil
         isPerformingSelection = true
         do {
-            try await session.setActiveWorkoutSessionId(Int(ws.id()))
+            try await session.setActiveWorkoutSessionId(ws.id())
             navigateToWorkout = true
         } catch {
             selectionError = error
