@@ -26,11 +26,15 @@ struct ExerciseSetModel: Identifiable, Hashable {
     let id: UUID
     let backendID: Int?
     var label: String
+    let weight: Float
+    let reps: Int
 
-    init(id: UUID = UUID(), backendID: Int? = nil, label: String) {
+    init(id: UUID = UUID(), backendID: Int? = nil, label: String, weight: Float, reps: Int) {
         self.id = id
         self.backendID = backendID
         self.label = label
+        self.weight = weight
+        self.reps = reps
     }
 }
 
@@ -70,6 +74,9 @@ final class Session: ObservableObject {
     @Published private(set) var activeWorkoutSession: YokuUniffi.WorkoutSession?
     @Published var elapsedTime: TimeInterval = 0
     @Published var lastError: Error?
+
+    // New: lifts map keyed by backend exercise id
+    @Published private(set) var liftsByExerciseId: [Int: [Float]] = [:]
 
     private let backend = BackendSessionCoordinator()
     private var timerCancellable: AnyCancellable?
@@ -242,33 +249,13 @@ final class Session: ObservableObject {
 
     func dataSeries(for exercise: ExerciseModel?) -> [Int] {
         guard let exercise else { return [] }
-        let lower = exercise.name.lowercased()
-        if lower.contains("deadlift") {
-            return [5, 5, 5]
+        // Use the fetched lifts by backend id, map to Ints for charting
+        if let backendID = exercise.backendID,
+            let lifts = liftsByExerciseId[backendID]
+        {
+            return lifts.map { Int($0) }
         }
-        if lower.contains("bench") {
-            return [8, 8, 6]
-        }
-        if lower.contains("pull") {
-            return [10, 8, 6]
-        }
-        if lower.contains("squat") {
-            return [5, 5, 5]
-        }
-        if lower.contains("press") || lower.contains("overhead") {
-            return [8, 6, 6]
-        }
-
-        let numbers = exercise.sets.compactMap { set -> Int? in
-            let digits = set.label.compactMap { $0.isNumber ? Int(String($0)) : nil }
-            guard !digits.isEmpty else { return nil }
-            return digits.reduce(0) { $0 * 10 + $1 }
-        }
-
-        if numbers.isEmpty {
-            return Array(1...max(1, exercise.sets.count))
-        }
-        return numbers
+        return []
     }
 
     // MARK: - Internal helpers
@@ -276,6 +263,7 @@ final class Session: ObservableObject {
     private func apply(snapshot: BackendSessionCoordinator.Snapshot) {
         session = snapshot.session
         activeWorkoutSession = snapshot.workout
+        liftsByExerciseId = snapshot.liftsByExerciseId
         updateExercises(with: snapshot.exercises, sets: snapshot.sets)
     }
 
@@ -311,7 +299,10 @@ final class Session: ObservableObject {
                 let setUUID = setIDMap[backendSetID] ?? UUID()
                 nextSetMap[backendSetID] = setUUID
                 let label = "Set \(backendSet.id())"
-                return ExerciseSetModel(id: setUUID, backendID: backendSetID, label: label)
+                let weight = backendSet.weight()
+                let reps = Int(backendSet.reps())
+                return ExerciseSetModel(
+                    id: setUUID, backendID: backendSetID, label: label, weight: weight, reps: reps)
             }
 
             let model = ExerciseModel(
@@ -359,6 +350,7 @@ final class Session: ObservableObject {
         session = nil
         exerciseIDMap = [:]
         setIDMap = [:]
+        liftsByExerciseId = [:]
     }
 
     private func mapCoordinatorError(_ error: Error) -> Error {
@@ -381,23 +373,23 @@ extension Session {
             ExerciseModel(
                 name: "Bench Press",
                 sets: [
-                    ExerciseSetModel(label: "8 reps"),
-                    ExerciseSetModel(label: "8 reps"),
-                    ExerciseSetModel(label: "6 reps"),
+                    ExerciseSetModel(label: "8 reps", weight: 10.0, reps: 5),
+                    ExerciseSetModel(label: "8 reps", weight: 10.0, reps: 5),
+                    ExerciseSetModel(label: "6 reps", weight: 10.0, reps: 6),
                 ]),
             ExerciseModel(
                 name: "Squat",
                 sets: [
-                    ExerciseSetModel(label: "5 reps"),
-                    ExerciseSetModel(label: "5 reps"),
-                    ExerciseSetModel(label: "5 reps"),
+                    ExerciseSetModel(label: "5 reps", weight: 10.0, reps: 5),
+                    ExerciseSetModel(label: "5 reps", weight: 10.0, reps: 5),
+                    ExerciseSetModel(label: "5 reps", weight: 10.0, reps: 5),
                 ]),
             ExerciseModel(
                 name: "Pull Ups",
                 sets: [
-                    ExerciseSetModel(label: "10 reps"),
-                    ExerciseSetModel(label: "8 reps"),
-                    ExerciseSetModel(label: "6 reps"),
+                    ExerciseSetModel(label: "10 reps", weight: 10.0, reps: 10),
+                    ExerciseSetModel(label: "8 reps", weight: 10.0, reps: 8),
+                    ExerciseSetModel(label: "6 reps", weight: 10.0, reps: 6),
                 ]),
         ]
         if let first = session.exercises.first {
@@ -417,6 +409,7 @@ private actor BackendSessionCoordinator {
         let workout: YokuUniffi.WorkoutSession?
         let exercises: [YokuUniffi.Exercise]
         let sets: [YokuUniffi.WorkoutSet]
+        let liftsByExerciseId: [Int: [Float]]
     }
 
     enum CoordinatorError: LocalizedError {
@@ -466,6 +459,12 @@ private actor BackendSessionCoordinator {
         return try await snapshot(for: session)
     }
 
+    func getLiftsForExercise(_ id: Int32) async throws -> [Float] {
+        let session = try requireSession()
+        return try await YokuUniffi.getLiftsForExercise(
+            session: session, exerciseId: id, limit: 100)
+    }
+
     func createBlankWorkoutSession() async throws -> Snapshot {
         let session = try requireSession()
         try await YokuUniffi.createBlankWorkoutSession(session: session)
@@ -492,11 +491,35 @@ private actor BackendSessionCoordinator {
         let exercises = (try? await exercisesTask) ?? []
         let sets = (try? await setsTask) ?? []
 
+        // Concurrently fetch lifts for each exercise (best-effort)
+        let liftsByExerciseId: [Int: [Float]] = await withTaskGroup(of: (Int, [Float]?).self) {
+            group in
+            for ex in exercises {
+                let exId = Int(ex.id())
+                group.addTask {
+                    do {
+                        let lifts = try await YokuUniffi.getLiftsForExercise(
+                            session: session, exerciseId: Int32(exId), limit: 100)
+                        return (exId, lifts)
+                    } catch {
+                        return (exId, nil)
+                    }
+                }
+            }
+
+            var dict: [Int: [Float]] = [:]
+            for await (id, lifts) in group {
+                dict[id] = lifts ?? []
+            }
+            return dict
+        }
+
         return Snapshot(
             session: session,
             workout: workout,
             exercises: exercises,
-            sets: sets
+            sets: sets,
+            liftsByExerciseId: liftsByExerciseId
         )
     }
 

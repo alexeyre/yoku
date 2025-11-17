@@ -78,6 +78,9 @@ struct SetList: View {
                                 Text(set.label)
                                     .font(.system(.footnote, design: .monospaced)) // match exercise font
                                     .lineLimit(1)
+                                Text("\(set.weight) x \(set.reps)")
+                                    .font(.system(.footnote, design: .monospaced)) // match exercise font
+                                    .lineLimit(1)
 
                                 if set.id == workoutState.activeSetID {
                                     Spacer(minLength: 4)
@@ -141,6 +144,7 @@ struct SetList: View {
     // MARK: - Extracted Chart Component
 
     private struct SetChartView: View {
+        @EnvironmentObject var workoutState: Session
         let exerciseName: String?
         let dataPoints: [Int]
         let activeSetIndex: Int?

@@ -483,3 +483,32 @@ pub fn delete_workout_set(conn: &mut SqliteConnection, set_id: i32) -> Result<us
             e.into()
         })
 }
+
+pub fn get_exercise_entries(
+    conn: &mut SqliteConnection,
+    exercise_id: i32,
+    limit: Option<i64>,
+) -> Result<Vec<WorkoutSet>> {
+    debug!(
+        "get_exercise_entries called exercise_id={:?} limit={:?}",
+        exercise_id, limit
+    );
+    let query = workout_sets::table
+        .filter(workout_sets::exercise_id.eq(exercise_id))
+        .order(workout_sets::created_at.asc());
+
+    let sets = if let Some(limit) = limit {
+        query.limit(limit).load::<WorkoutSet>(conn)
+    } else {
+        query.load::<WorkoutSet>(conn)
+    }
+    .map_err(|e| {
+        error!(
+            "failed to load exercise entries for exercise id {}: {}",
+            exercise_id, e
+        );
+        anyhow::Error::from(e)
+    })?;
+
+    Ok(sets)
+}

@@ -43,6 +43,20 @@ pub async fn add_set_from_string(
 }
 
 #[uniffi::export]
+pub async fn get_lifts_for_exercise(
+    session: &Session,
+    exercise_id: i32,
+    limit: Option<i64>,
+) -> std::result::Result<Vec<f32>, YokuError> {
+    let rt = crate::runtime::init_global_runtime_blocking();
+    let sets = rt.block_on(session.get_sets_for_exercise(exercise_id, limit))?;
+
+    let converted: Vec<f32> = sets.into_iter().map(|lift| lift.weight).collect();
+
+    Ok(converted)
+}
+
+#[uniffi::export]
 pub async fn get_all_workout_sessions(
     session: &Session,
 ) -> std::result::Result<Vec<Arc<WorkoutSession>>, YokuError> {
@@ -70,6 +84,8 @@ pub async fn get_all_sets(
             Arc::new(WorkoutSet {
                 id: ws.id,
                 exercise_id: ws.exercise_id,
+                weight: ws.weight,
+                reps: ws.reps,
             })
         })
         .collect();

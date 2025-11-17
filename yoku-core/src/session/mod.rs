@@ -2,8 +2,8 @@ use crate::db;
 use crate::db::models::{Exercise, WorkoutSession};
 use crate::db::operations::{
     add_multiple_sets_to_workout, add_workout_set, create_request_string_for_username,
-    create_workout_session, get_or_create_exercise, get_sets_for_session, get_workout_session,
-    update_workout_set_from_parsed,
+    create_workout_session, get_exercise_entries, get_or_create_exercise, get_sets_for_session,
+    get_workout_session, update_workout_set_from_parsed,
 };
 use crate::llm::{LlmInterface, ParsedSet};
 use anyhow::Result;
@@ -90,6 +90,19 @@ impl Session {
         self.set_workout_id(workout.id).await
     }
 
+    pub async fn get_sets_for_exercise(
+        &self,
+        exercise_id: i32,
+        limit: Option<i64>,
+    ) -> Result<Vec<crate::db::models::WorkoutSet>> {
+        let pool = self.db_pool.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            get_exercise_entries(&mut conn, exercise_id, limit)
+        })
+        .await?
+    }
+
     pub async fn get_workout_id(&self) -> Option<i32> {
         self.workout_id.lock().await.clone()
     }
@@ -157,8 +170,14 @@ impl Session {
     }
 
     pub async fn add_set_from_string(&self, request_string: &str) -> Result<()> {
+        let known_exercises: Vec<String> = self
+            .get_all_exercises()
+            .await?
+            .into_iter()
+            .map(|exercise| exercise.name)
+            .collect();
         let ctx = crate::llm::PromptContext {
-            known_exercises: vec![],
+            known_exercises,
             ..Default::default()
         };
         let builder = crate::llm::PromptBuilder::new(ctx);

@@ -86,6 +86,8 @@ impl From<db::models::WorkoutSession> for WorkoutSession {
 pub struct WorkoutSet {
     pub id: i32,
     pub exercise_id: i32,
+    pub weight: f32,
+    pub reps: i32,
 }
 
 #[uniffi::export]
@@ -98,5 +100,15 @@ impl WorkoutSet {
     /// Return the associated exercise id.
     fn exercise_id(&self) -> i32 {
         self.exercise_id
+    }
+
+    /// Return the weight of the set.
+    fn weight(&self) -> f32 {
+        self.weight
+    }
+
+    /// Return the number of reps in the set.
+    fn reps(&self) -> i32 {
+        self.reps
     }
 }
