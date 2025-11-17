@@ -48,10 +48,7 @@
             ];
 
             cargoBuildFlags = [
-              "--bin"
-              "yoku-cli"
-              "-p"
-              "yoku-cli"
+              "--lib"
             ];
 
             meta = with pkgs.lib; {

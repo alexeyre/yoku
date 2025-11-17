@@ -22,7 +22,8 @@ pub async fn reset_database(session: &Session) -> std::result::Result<(), YokuEr
     let rt = crate::runtime::init_global_runtime_blocking();
     rt.block_on(async {
         // Use the runtime to get the global connection and run migrations/reset.
-        let mut db_conn = crate::db::get_conn().await.lock().await;
+        let mut db_conn = session.db_pool.get().unwrap();
+        //let mut db_conn = crate::db::get_conn().await.lock().await;
         db::drop_all_tables(&mut db_conn).await?;
         db::init_database(&mut db_conn).await?;
         Ok::<(), crate::uniffi_interface::errors::YokuError>(())

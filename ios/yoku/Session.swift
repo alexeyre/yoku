@@ -3,10 +3,10 @@ import Foundation
 import SwiftUI
 import YokuUniffi
 
-extension YokuUniffi.Session: @unchecked Sendable {}
-extension YokuUniffi.WorkoutSession: @unchecked Sendable {}
-extension YokuUniffi.Exercise: @unchecked Sendable {}
-extension YokuUniffi.WorkoutSet: @unchecked Sendable {}
+//extension YokuUniffi.Session: @unchecked Sendable {}
+//extension YokuUniffi.WorkoutSession: @unchecked Sendable {}
+//extension YokuUniffi.Exercise: @unchecked Sendable {}
+//extension YokuUniffi.WorkoutSet: @unchecked Sendable {}
 
 struct ExerciseModel: Identifiable, Hashable {
     let id: UUID
@@ -292,12 +292,20 @@ final class Session: ObservableObject {
         var nextSetMap: [Int: UUID] = [:]
         var models: [ExerciseModel] = []
 
+        nextExerciseMap.reserveCapacity(sortedExercises.count)
+        nextSetMap.reserveCapacity(backendSets.count)
+        models.reserveCapacity(sortedExercises.count)
+
         for exercise in sortedExercises {
             let backendID = Int(exercise.id())
+            let sets = setsGrouped[backendID] ?? []
+            guard !sets.isEmpty else {
+                continue
+            }
+
             let exerciseUUID = exerciseIDMap[backendID] ?? UUID()
             nextExerciseMap[backendID] = exerciseUUID
 
-            let sets = setsGrouped[backendID] ?? []
             let setModels = sets.map { backendSet -> ExerciseSetModel in
                 let backendSetID = Int(backendSet.id())
                 let setUUID = setIDMap[backendSetID] ?? UUID()
@@ -315,9 +323,14 @@ final class Session: ObservableObject {
             models.append(model)
         }
 
-        exercises = models
         exerciseIDMap = nextExerciseMap
         setIDMap = nextSetMap
+
+        guard models != exercises else {
+            return
+        }
+
+        exercises = models
         reconcileSelectionAfterUpdate()
     }
 
@@ -471,13 +484,13 @@ private actor BackendSessionCoordinator {
     }
 
     private func snapshot(for session: YokuUniffi.Session) async throws -> Snapshot {
-        let workout = try? await YokuUniffi.getSessionWorkoutSession(session: session)
+        async let workoutTask = YokuUniffi.getSessionWorkoutSession(session: session)
+        async let exercisesTask = YokuUniffi.getAllExercises(session: session)
+        async let setsTask = YokuUniffi.getAllSets(session: session)
 
-        let fetchedExercises = try? await YokuUniffi.getAllExercises(session: session)
-        let exercises = fetchedExercises?.map { $0 } ?? []
-
-        let fetchedSets = try? await YokuUniffi.getAllSets(session: session)
-        let sets = fetchedSets?.map { $0 } ?? []
+        let workout = try? await workoutTask
+        let exercises = (try? await exercisesTask) ?? []
+        let sets = (try? await setsTask) ?? []
 
         return Snapshot(
             session: session,

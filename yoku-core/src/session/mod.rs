@@ -1,3 +1,4 @@
+use crate::db;
 use crate::db::models::{Exercise, WorkoutSession};
 use crate::db::operations::{
     add_multiple_sets_to_workout, add_workout_set, create_request_string_for_username,
@@ -5,17 +6,19 @@ use crate::db::operations::{
     update_workout_set_from_parsed,
 };
 use crate::llm::{LlmInterface, ParsedSet};
-use crate::*;
 use anyhow::Result;
+use diesel::Connection;
+use diesel::RunQueryDsl;
 use diesel::SqliteConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[derive(uniffi::Object)]
 pub struct Session {
     pub workout_id: Mutex<Option<i32>>,
     pub db_pool: Pool<ConnectionManager<SqliteConnection>>,
-    pub llm_backend: Mutex<LlmInterface>,
+    pub llm_backend: Arc<LlmInterface>,
 }
 
 const fn get_openai_api_key() -> &'static str {
@@ -28,19 +31,29 @@ impl Session {
         let mut conn = crate::db::get_conn_from_uri(db_path).await?;
         db::init_database(&mut conn).await?;
 
-        // Create an r2d2 pool with a max of 2 connections
+        diesel::sql_query("PRAGMA journal_mode = WAL;").execute(&mut conn)?;
+        diesel::sql_query("PRAGMA synchronous = NORMAL;").execute(&mut conn)?;
+        diesel::sql_query("PRAGMA busy_timeout = 5000;").execute(&mut conn)?;
+
+        // Size the r2d2 pool based on available parallelism to balance contention and throughput
         let manager = ConnectionManager::<SqliteConnection>::new(db_path);
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get().min(8))
+            .unwrap_or(4);
+        let max_size = (threads.max(2)) as u32;
         let pool = Pool::builder()
-            .max_size(2)
+            .max_size(max_size)
+            .min_idle(Some(1))
             .build(manager)
             .map_err(|e| anyhow::anyhow!(format!("Failed to create DB pool: {}", e)))?;
 
-        let llm_backend =
-            LlmInterface::new_openai(Some(get_openai_api_key().to_string()), Some(model)).await?;
+        let llm_backend = Arc::new(
+            LlmInterface::new_openai(Some(get_openai_api_key().to_string()), Some(model)).await?,
+        );
         Ok(Self {
             workout_id: Mutex::new(None),
             db_pool: pool,
-            llm_backend: Mutex::new(llm_backend),
+            llm_backend,
         })
     }
 
@@ -97,17 +110,8 @@ impl Session {
     }
 
     pub async fn replace_set_from_parsed(&self, set_id: i32, parsed: &ParsedSet) -> Result<()> {
-        // Build an owned ParsedSet to move into the blocking closure
-        let parsed_owned = ParsedSet {
-            exercise: parsed.exercise.clone(),
-            weight: parsed.weight,
-            reps: parsed.reps,
-            rpe: parsed.rpe,
-            set_count: parsed.set_count,
-            tags: parsed.tags.clone(),
-            aoi: parsed.aoi.clone(),
-            original_string: parsed.original_string.clone(),
-        };
+        // Clone once to move into the blocking closure
+        let parsed_owned = parsed.clone();
         let pool = self.db_pool.clone();
         tokio::task::spawn_blocking(move || {
             let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -158,8 +162,9 @@ impl Session {
             ..Default::default()
         };
         let builder = crate::llm::PromptBuilder::new(ctx);
-        let backend = self.llm_backend.lock().await;
-        let parsed = crate::llm::parse_set_string(&backend, &builder, &request_string).await?;
+        let parsed =
+            crate::llm::parse_set_string(self.llm_backend.as_ref(), &builder, request_string)
+                .await?;
         self.add_set_from_parsed(&parsed).await
     }
 
@@ -168,24 +173,6 @@ impl Session {
             .get_workout_id()
             .await
             .ok_or_else(|| anyhow::anyhow!("No active workout in session"))?;
-
-        let pool = self.db_pool.clone();
-
-        // get or create exercise (blocking)
-        let exercise = {
-            let pool = pool.clone();
-            let exercise_name = parsed.exercise.clone();
-            tokio::task::spawn_blocking(move || {
-                let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                get_or_create_exercise(&mut conn, &exercise_name)
-            })
-            .await??
-        };
-
-        let weight = parsed.weight.unwrap_or(0.0);
-        let reps = parsed.reps.unwrap_or(0);
-        let set_count = parsed.set_count.unwrap_or(1).max(1);
-        let parsed_rpe = parsed.rpe;
 
         let request_str_content = if !parsed.original_string.is_empty() {
             parsed.original_string.clone()
@@ -198,50 +185,53 @@ impl Session {
             )
         };
 
-        // create request string (blocking) and get id
-        let request_string_id = {
-            let pool = pool.clone();
-            let content = request_str_content.clone();
-            tokio::task::spawn_blocking(move || {
-                let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                let req = create_request_string_for_username(&mut conn, "cli", content)?;
-                Ok::<i32, anyhow::Error>(req.id)
-            })
-            .await??
-        };
+        let pool = self.db_pool.clone();
+        let parsed_owned = parsed.clone();
+        tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
+            let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            conn.transaction::<_, anyhow::Error, _>(|tx_conn| {
+                let exercise_name = parsed_owned.exercise.clone();
+                let exercise = get_or_create_exercise(tx_conn, &exercise_name)?;
 
-        if set_count > 1 {
-            let pool = pool.clone();
-            tokio::task::spawn_blocking(move || {
-                let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                add_multiple_sets_to_workout(
-                    &mut conn,
-                    &session_id,
-                    &exercise.id,
-                    &request_string_id,
-                    &weight,
-                    &reps,
-                    parsed_rpe,
-                    set_count,
-                )
-            })
-            .await??;
-        } else {
-            let pool = pool.clone();
-            tokio::task::spawn_blocking(move || {
-                let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                add_workout_set(
-                    &mut conn,
-                    &session_id,
-                    &exercise.id,
-                    &request_string_id,
-                    &weight,
-                    &reps,
-                    parsed_rpe,
-                )
-            })
-            .await??;
-        }
+                let weight = parsed_owned.weight.unwrap_or(0.0);
+                let reps = parsed_owned.reps.unwrap_or(0);
+                let set_count = parsed_owned.set_count.unwrap_or(1).max(1);
+                let parsed_rpe = parsed_owned.rpe;
+
+                let request = create_request_string_for_username(
+                    tx_conn,
+                    "cli",
+                    request_str_content.clone(),
+                )?;
+
+                if set_count > 1 {
+                    add_multiple_sets_to_workout(
+                        tx_conn,
+                        &session_id,
+                        &exercise.id,
+                        &request.id,
+                        &weight,
+                        &reps,
+                        parsed_rpe,
+                        set_count,
+                    )?;
+                } else {
+                    add_workout_set(
+                        tx_conn,
+                        &session_id,
+                        &exercise.id,
+                        &request.id,
+                        &weight,
+                        &reps,
+                        parsed_rpe,
+                    )?;
+                }
+
+                Ok(())
+            })?;
+            Ok(())
+        })
+        .await??;
 
         Ok(())
     }

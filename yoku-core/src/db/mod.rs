@@ -9,8 +9,6 @@ use anyhow::Result;
 use diesel::SqliteConnection;
 use diesel::prelude::*;
 use std::env;
-use std::fs;
-use std::path::Path;
 use tokio::sync::Mutex;
 use tokio::sync::OnceCell;
 
