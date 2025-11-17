@@ -24,10 +24,7 @@ struct CommandInputBar: View {
                 .disabled(isProcessing)
 
             if isProcessing {
-                // Minimal unix spinner style (ASCII)
-                Text("[ … ]")
-                    .font(.system(.footnote, design: .monospaced))
-                    .foregroundColor(.secondary)
+                SpinnerView()
                     .transition(.opacity)
             } else if let emoji = statusEmoji {
                 Text(emoji)
@@ -48,10 +45,7 @@ struct CommandInputBar: View {
         let cmd = inputText
 
         Task {
-            // Call your async Session function
             _ = try? await session.addSetFromString(input: cmd)
-
-            // when done
             await MainActor.run {
                 inputText = ""
                 isProcessing = false

@@ -97,6 +97,9 @@ private struct RootView: View {
     @State private var isPerformingSelection = false
     @State private var selectionError: Error?
 
+    // Settings navigation
+    @State private var showSettings = false
+
     var body: some View {
         NavigationStack {
             VStack {
@@ -199,6 +202,21 @@ private struct RootView: View {
                 .padding()
             }
             .navigationTitle("Workouts")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("Settings")
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                NavigationStack {
+                    SettingsView()
+                }
+            }
             .navigationDestination(isPresented: $navigateToWorkout) {
                 ContentView()
                     .environmentObject(session)

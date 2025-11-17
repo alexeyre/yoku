@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		6A3DF9E32EC9237B00359166 /* YokuUniffi in Frameworks */ = {isa = PBXBuildFile; productRef = 6A3DF9E22EC9237B00359166 /* YokuUniffi */; };
+		6AA4B8322ECB882B00BD336D /* YokuUniffi in Frameworks */ = {isa = PBXBuildFile; productRef = 6AA7525D2EC5618B0030349A /* YokuUniffi */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +41,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6AA4B8322ECB882B00BD336D /* YokuUniffi in Frameworks */,
 				6A3DF9E32EC9237B00359166 /* YokuUniffi in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
