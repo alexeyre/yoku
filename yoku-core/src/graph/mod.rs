@@ -6,7 +6,7 @@ use chrono::Utc;
 use neo4rs::{Graph, query};
 use tokio::sync::OnceCell;
 
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 
 use crate::db::models::{Exercise, Muscle};
 

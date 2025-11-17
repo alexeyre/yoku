@@ -21,11 +21,8 @@ pub async fn reset_database(session: &Session) -> std::result::Result<(), YokuEr
     // Ensure runtime is initialized and run database reset on it.
     let rt = crate::runtime::init_global_runtime_blocking();
     rt.block_on(async {
-        // Use the runtime to get the global connection and run migrations/reset.
-        let mut db_conn = session.db_pool.get().unwrap();
-        //let mut db_conn = crate::db::get_conn().await.lock().await;
-        db::drop_all_tables(&mut db_conn).await?;
-        db::init_database(&mut db_conn).await?;
+        db::drop_all_tables(&session.db_pool).await?;
+        db::init_database(&session.db_pool).await?;
         Ok::<(), crate::uniffi_interface::errors::YokuError>(())
     })?;
     Ok(())
@@ -45,13 +42,13 @@ pub async fn add_set_from_string(
 #[uniffi::export]
 pub async fn get_lifts_for_exercise(
     session: &Session,
-    exercise_id: i32,
+    exercise_id: i64,
     limit: Option<i64>,
-) -> std::result::Result<Vec<f32>, YokuError> {
+) -> std::result::Result<Vec<f64>, YokuError> {
     let rt = crate::runtime::init_global_runtime_blocking();
     let sets = rt.block_on(session.get_sets_for_exercise(exercise_id, limit))?;
 
-    let converted: Vec<f32> = sets.into_iter().map(|lift| lift.weight).collect();
+    let converted: Vec<f64> = sets.into_iter().map(|lift| lift.weight).collect();
 
     Ok(converted)
 }
@@ -111,7 +108,7 @@ pub async fn get_all_exercises(
 #[uniffi::export]
 pub async fn set_session_workout_session_id(
     session: &Session,
-    id: i32,
+    id: i64,
 ) -> std::result::Result<(), YokuError> {
     let rt = crate::runtime::init_global_runtime_blocking();
     rt.block_on(session.set_workout_id(id))?;

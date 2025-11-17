@@ -7,17 +7,14 @@ use crate::db::operations::{
 };
 use crate::llm::{LlmInterface, ParsedSet};
 use anyhow::Result;
-use diesel::Connection;
-use diesel::RunQueryDsl;
-use diesel::SqliteConnection;
-use diesel::r2d2::{ConnectionManager, Pool};
+use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[derive(uniffi::Object)]
 pub struct Session {
-    pub workout_id: Mutex<Option<i32>>,
-    pub db_pool: Pool<ConnectionManager<SqliteConnection>>,
+    pub workout_id: Mutex<Option<i64>>,
+    pub db_pool: SqlitePool,
     pub llm_backend: Arc<LlmInterface>,
 }
 
@@ -27,25 +24,18 @@ const fn get_openai_api_key() -> &'static str {
 
 impl Session {
     pub async fn new(db_path: &str, model: String) -> Result<Self> {
-        // Ensure migrations are run once using a direct connection (keeps behavior from before)
-        let mut conn = crate::db::get_conn_from_uri(db_path).await?;
-        db::init_database(&mut conn).await?;
-
-        diesel::sql_query("PRAGMA journal_mode = WAL;").execute(&mut conn)?;
-        diesel::sql_query("PRAGMA synchronous = NORMAL;").execute(&mut conn)?;
-        diesel::sql_query("PRAGMA busy_timeout = 5000;").execute(&mut conn)?;
-
-        // Size the r2d2 pool based on available parallelism to balance contention and throughput
-        let manager = ConnectionManager::<SqliteConnection>::new(db_path);
-        let threads = std::thread::available_parallelism()
-            .map(|n| n.get().min(8))
-            .unwrap_or(4);
-        let max_size = (threads.max(2)) as u32;
-        let pool = Pool::builder()
-            .max_size(max_size)
-            .min_idle(Some(1))
-            .build(manager)
+        // Create SQLx pool - SQLite will create the database file if it doesn't exist
+        let pool = SqlitePool::connect(db_path)
+            .await
             .map_err(|e| anyhow::anyhow!(format!("Failed to create DB pool: {}", e)))?;
+
+        // Set SQLite PRAGMAs
+        sqlx::query("PRAGMA journal_mode = WAL").execute(&pool).await?;
+        sqlx::query("PRAGMA synchronous = NORMAL").execute(&pool).await?;
+        sqlx::query("PRAGMA busy_timeout = 5000").execute(&pool).await?;
+
+        // Run migrations - this will create tables if they don't exist
+        db::init_database(&pool).await?;
 
         let llm_backend = Arc::new(
             LlmInterface::new_openai(Some(get_openai_api_key().to_string()), Some(model)).await?,
@@ -57,116 +47,64 @@ impl Session {
         })
     }
 
-    pub async fn set_workout_id(&self, workout_id: i32) -> Result<()> {
-        let pool = self.db_pool.clone();
-        // Validate the workout exists using a blocking DB call
-        let _ = tokio::task::spawn_blocking(move || {
-            let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            get_workout_session(&mut conn, workout_id)
-        })
-        .await??;
+    pub async fn set_workout_id(&self, workout_id: i64) -> Result<()> {
+        // Validate the workout exists
+        let _ = get_workout_session(&self.db_pool, workout_id).await?;
         *self.workout_id.lock().await = Some(workout_id);
         Ok(())
     }
 
     pub async fn new_workout(&self) -> Result<()> {
-        let pool = self.db_pool.clone();
-        let workout_id = tokio::task::spawn_blocking(move || {
-            let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            create_workout_session(&mut conn, None, None, None, None).map(|w| w.id)
-        })
-        .await??;
-        self.set_workout_id(workout_id).await
+        let workout = create_workout_session(&self.db_pool, None, None, None, None).await?;
+        self.set_workout_id(workout.id).await
     }
 
     pub async fn new_workout_with_name(&self, name: &str) -> Result<()> {
-        let pool = self.db_pool.clone();
-        let name_owned = name.to_string();
-        let workout = tokio::task::spawn_blocking(move || {
-            let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            create_workout_session(&mut conn, None, Some(name_owned), None, None)
-        })
-        .await??;
+        let workout = create_workout_session(&self.db_pool, None, Some(name.to_string()), None, None).await?;
         self.set_workout_id(workout.id).await
     }
 
     pub async fn get_sets_for_exercise(
         &self,
-        exercise_id: i32,
+        exercise_id: i64,
         limit: Option<i64>,
     ) -> Result<Vec<crate::db::models::WorkoutSet>> {
-        let pool = self.db_pool.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            get_exercise_entries(&mut conn, exercise_id, limit)
-        })
-        .await?
+        get_exercise_entries(&self.db_pool, exercise_id, limit).await
     }
 
-    pub async fn get_workout_id(&self) -> Option<i32> {
+    pub async fn get_workout_id(&self) -> Option<i64> {
         self.workout_id.lock().await.clone()
     }
 
     pub async fn get_workout_session(&self) -> Result<WorkoutSession> {
         let workout_id = self.get_workout_id().await;
         if let Some(workout_id) = workout_id {
-            let pool = self.db_pool.clone();
-            let workout = tokio::task::spawn_blocking(move || {
-                let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                get_workout_session(&mut conn, workout_id)
-            })
-            .await??;
-            Ok(workout)
+            get_workout_session(&self.db_pool, workout_id).await
         } else {
             Err(anyhow::anyhow!("No active workout"))
         }
     }
 
-    pub async fn replace_set_from_parsed(&self, set_id: i32, parsed: &ParsedSet) -> Result<()> {
-        // Clone once to move into the blocking closure
-        let parsed_owned = parsed.clone();
-        let pool = self.db_pool.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            update_workout_set_from_parsed(&mut conn, set_id, &parsed_owned)
-        })
-        .await??;
+    pub async fn replace_set_from_parsed(&self, set_id: i64, parsed: &ParsedSet) -> Result<()> {
+        update_workout_set_from_parsed(&self.db_pool, set_id, parsed).await?;
         Ok(())
     }
 
     pub async fn get_all_sets(&self) -> Result<Vec<crate::db::models::WorkoutSet>> {
         let workout_id = self.get_workout_id().await;
         if let Some(workout_id) = workout_id {
-            let pool = self.db_pool.clone();
-            let sets = tokio::task::spawn_blocking(move || {
-                let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                get_sets_for_session(&mut conn, workout_id)
-            })
-            .await??;
-            Ok(sets)
+            get_sets_for_session(&self.db_pool, workout_id).await
         } else {
             Err(anyhow::anyhow!("No active workout"))
         }
     }
 
     pub async fn get_all_exercises(&self) -> Result<Vec<Exercise>> {
-        let pool = self.db_pool.clone();
-        let exercises = tokio::task::spawn_blocking(move || {
-            let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            db::operations::get_all_exercises(&mut conn)
-        })
-        .await??;
-        Ok(exercises)
+        db::operations::get_all_exercises(&self.db_pool).await
     }
 
     pub async fn get_all_workouts(&self) -> Result<Vec<WorkoutSession>> {
-        let pool = self.db_pool.clone();
-        let workouts = tokio::task::spawn_blocking(move || {
-            let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            db::operations::get_all_workout_sessions(&mut conn)
-        })
-        .await??;
-        Ok(workouts)
+        db::operations::get_all_workout_sessions(&self.db_pool).await
     }
 
     pub async fn add_set_from_string(&self, request_string: &str) -> Result<()> {
@@ -204,53 +142,45 @@ impl Session {
             )
         };
 
-        let pool = self.db_pool.clone();
-        let parsed_owned = parsed.clone();
-        tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
-            let mut conn = pool.get().map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            conn.transaction::<_, anyhow::Error, _>(|tx_conn| {
-                let exercise_name = parsed_owned.exercise.clone();
-                let exercise = get_or_create_exercise(tx_conn, &exercise_name)?;
+        // Use a transaction - operations need to be updated to accept transactions
+        // For now, execute operations sequentially on the pool
+        // TODO: Update operations to accept Executor trait for transaction support
+        let exercise_name = parsed.exercise.clone();
+        let exercise = get_or_create_exercise(&self.db_pool, &exercise_name).await?;
 
-                let weight = parsed_owned.weight.unwrap_or(0.0);
-                let reps = parsed_owned.reps.unwrap_or(0);
-                let set_count = parsed_owned.set_count.unwrap_or(1).max(1);
-                let parsed_rpe = parsed_owned.rpe;
+        let weight = parsed.weight.unwrap_or(0.0) as f64;
+        let reps = parsed.reps.unwrap_or(0) as i64;
+        let set_count = parsed.set_count.unwrap_or(1).max(1) as i64;
+        let parsed_rpe = parsed.rpe.map(|r| r as f64);
 
-                let request = create_request_string_for_username(
-                    tx_conn,
-                    "cli",
-                    request_str_content.clone(),
-                )?;
+        let request = create_request_string_for_username(
+            &self.db_pool,
+            "cli",
+            request_str_content.clone(),
+        ).await?;
 
-                if set_count > 1 {
-                    add_multiple_sets_to_workout(
-                        tx_conn,
-                        &session_id,
-                        &exercise.id,
-                        &request.id,
-                        &weight,
-                        &reps,
-                        parsed_rpe,
-                        set_count,
-                    )?;
-                } else {
-                    add_workout_set(
-                        tx_conn,
-                        &session_id,
-                        &exercise.id,
-                        &request.id,
-                        &weight,
-                        &reps,
-                        parsed_rpe,
-                    )?;
-                }
-
-                Ok(())
-            })?;
-            Ok(())
-        })
-        .await??;
+        if set_count > 1 {
+            add_multiple_sets_to_workout(
+                &self.db_pool,
+                &session_id,
+                &exercise.id,
+                &request.id,
+                &weight,
+                &reps,
+                parsed_rpe,
+                set_count,
+            ).await?;
+        } else {
+            add_workout_set(
+                &self.db_pool,
+                &session_id,
+                &exercise.id,
+                &request.id,
+                &weight,
+                &reps,
+                parsed_rpe,
+            ).await?;
+        }
 
         Ok(())
     }
