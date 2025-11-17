@@ -10,6 +10,8 @@ import SwiftUI
 struct InformationHeader: View {
     // Read values from the shared WorkoutState
     @EnvironmentObject var workoutState: Session
+    
+    @Environment(\.dismiss) private var dismiss
 
     // Statically-provided items (still local)
     let workoutName: String = "FULL BODY A"
@@ -42,42 +44,73 @@ struct InformationHeader: View {
     }
 
     var body: some View {
-        VStack(spacing: 4) {
-            // First line: workout name and date
-            HStack(spacing: 12) {
-                labeledValue("WORKOUT", workoutName)
-                Spacer(minLength: 0)
-                Divider().frame(height: 12).opacity(0.15)
-                labeledValue("DATE", dateString, mirrored: true)
-            }
+        VStack {
+                HStack(spacing: 16) {
+                    Button {
+                        // stop workout action
+                        //workoutState.stopWorkoutSession()
+                        dismiss()
+                    } label: {
+                        Text("[ STOP ]")
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundColor(.red)
+                    }
 
-            // Second line: elapsed and current exercise
-            HStack(spacing: 12) {
-                labeledValue("ELAPSED", elapsedString)
-                Divider().frame(height: 12).opacity(0.15)
-                Spacer(minLength: 0)
-                labeledValue("CURRENT", currentExercise, mirrored: true)
-            }
+                    Button {
+                    } label: {
+                        Text(workoutState.isTimerRunning ? "[ PAUSE ]" : "[ RESUME ]")
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundColor(.primary)
+                    }
 
-            // Third line: totals
-            HStack(spacing: 12) {
-                labeledValue("EXERCISES", "\(totalExercises)")
-                Spacer(minLength: 0)
-                Divider().frame(height: 12).opacity(0.15)
-                labeledValue("SETS", "\(totalSets)", mirrored: true)
-            }
+                    Spacer()
 
-            // Optional: a very subtle hairline instead of a full divider
-            Rectangle()
-                .fill(Color.primary.opacity(0.08))
-                .frame(height: 0.5)
+                    Button {
+                    } label: {
+                        Text("[ NEXT ]")
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundColor(.primary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+            VStack(spacing: 4) {
+                // First line: workout name and date
+                HStack(spacing: 12) {
+                    labeledValue("WORKOUT", workoutName)
+                    Spacer(minLength: 0)
+                    Divider().frame(height: 12).opacity(0.15)
+                    labeledValue("DATE", dateString, mirrored: true)
+                }
+                
+                // Second line: elapsed and current exercise
+                HStack(spacing: 12) {
+                    labeledValue("ELAPSED", elapsedString)
+                    Divider().frame(height: 12).opacity(0.15)
+                    Spacer(minLength: 0)
+                    labeledValue("CURRENT", currentExercise, mirrored: true)
+                }
+                
+                // Third line: totals
+                HStack(spacing: 12) {
+                    labeledValue("EXERCISES", "\(totalExercises)")
+                    Spacer(minLength: 0)
+                    Divider().frame(height: 12).opacity(0.15)
+                    labeledValue("SETS", "\(totalSets)", mirrored: true)
+                }
+                
+                // Optional: a very subtle hairline instead of a full divider
+                Rectangle()
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(height: 0.5)
+            }
+            .font(.system(.footnote, design: .monospaced))
+            .padding(.horizontal, 12)
+            // Reduced bottom padding to pull the summary closer
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+            .contentShape(Rectangle())
         }
-        .font(.system(.footnote, design: .monospaced))
-        .padding(.horizontal, 12)
-        // Reduced bottom padding to pull the summary closer
-        .padding(.top, 6)
-        .padding(.bottom, 2)
-        .contentShape(Rectangle())
     }
 
     private func labeledValue(_ label: String, _ value: String, mirrored: Bool = false) -> some View {

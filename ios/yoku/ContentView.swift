@@ -1,46 +1,59 @@
 import SwiftUI
 import YokuUniffi
 
+// PreferenceKey to measure the input bar height
+private struct InputBarHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject var session: Session
-    var body: some View {
-        ZStack {
-            // Middle content: keep List as-is, just inset it to avoid header/input bar
-            SetList()
-                .padding(.top, headerHeight + summaryHeight + 26) // extra to clear header + summary
-                .padding(.bottom, inputBarHeight)
 
-            // Pinned header at top
+    // Measured input bar height so we can pad the scrollable content
+    @State private var inputBarHeight: CGFloat = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Pinned header (top)
             VStack(spacing: 0) {
                 InformationHeader()
                     .background(Color(.systemBackground))
-                    .padding(0)
-                // New: one-line LLM summary below the header
                 WorkoutPurposeSummaryView()
                     .padding(.horizontal, 12)
                     .padding(.bottom, 6)
                     .background(Color(.systemBackground))
-                Spacer()
             }
-            .frame(maxHeight: .infinity, alignment: .top)
 
-            // Pinned input bar at bottom (moves with keyboard)
-            VStack(spacing: 0) {
-                Spacer()
-                CommandInputBar()
-                    .background(.ultraThinMaterial)
-            }
-            .frame(maxHeight: .infinity, alignment: .bottom)
+            // Scrollable middle content
+            // We pad the bottom by the measured input bar height so content isn’t obscured.
+            SetList()
+                .environmentObject(session)
+                .padding(.bottom, inputBarHeight)
         }
+        // Pin the input bar using safeAreaInset so it rides above the keyboard automatically.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            CommandInputBar()
+                .environmentObject(session)
+                .background(.ultraThinMaterial)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear
+                            .preference(key: InputBarHeightPreferenceKey.self, value: proxy.size.height)
+                    }
+                )
+                .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: -2)
+        }
+        .onPreferenceChange(InputBarHeightPreferenceKey.self) { inputBarHeight = $0 }
+        // Let SwiftUI manage keyboard safe area for us; safeAreaInset handles lifting the bar.
+        .ignoresSafeArea(.keyboard, edges: [])
         .environmentObject(session)
     }
-
-    // Tune these constants to match your actual header/input sizes if needed.
-    private var headerHeight: CGFloat { 50 }     // approximate InformationHeader height
-    private var summaryHeight: CGFloat { 30 }    // approximate one-line summary height
-    private var inputBarHeight: CGFloat { 56 }   // approximate CommandInputBar height including padding
 }
 
 #Preview {
     ContentView()
+        .environmentObject(Session.preview)
 }

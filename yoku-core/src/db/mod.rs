@@ -27,6 +27,15 @@ pub async fn get_db_path() -> &'static String {
         .await
 }
 
+pub async fn drop_all_tables(db_conn: &mut SqliteConnection) -> Result<()> {
+    use schema::*;
+    diesel::delete(users::table).execute(db_conn)?;
+    diesel::delete(exercises::table).execute(db_conn)?;
+    diesel::delete(workout_sessions::table).execute(db_conn)?;
+    diesel::delete(workout_sets::table).execute(db_conn)?;
+    Ok(())
+}
+
 pub async fn set_db_path(path: &str) -> Result<()> {
     DB_PATH
         .set(path.to_string())
@@ -55,19 +64,9 @@ pub fn is_database_initialized() -> bool {
     conn.is_ok()
 }
 
-pub async fn init_database() -> Result<()> {
-    let db_path = get_db_path().await;
-
-    // Make sure parent dir exists
-    if let Some(parent) = Path::new(db_path).parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    // Try to connect (creates file if missing)
-    let mut conn = SqliteConnection::establish(db_path)
-        .map_err(|e| anyhow::anyhow!("Failed to connect to database: {e}"))?;
-
-    conn.run_pending_migrations(MIGRATIONS)
+pub async fn init_database(db_conn: &mut SqliteConnection) -> Result<()> {
+    db_conn
+        .run_pending_migrations(MIGRATIONS)
         .map_err(|e| anyhow::anyhow!("Migration failed: {e}"))?;
 
     Ok(())

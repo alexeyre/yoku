@@ -2,43 +2,60 @@ import SwiftUI
 
 struct CommandInputBar: View {
     @State private var inputText: String = ""
+    @State private var isProcessing: Bool = false
+    @EnvironmentObject var session: Session
 
     private var statusEmoji: String? {
-        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let lower = trimmed.lowercased()
-        if lower.contains("add") {
-            return "➕"
-        } else if lower.contains("modify") {
-            return "✏️"
-        } else {
-            return "❓"
+        guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
         }
+        let lower = inputText.lowercased()
+        if lower.contains("add") { return "➕" }
+        if lower.contains("modify") { return "✏️" }
+        return "❓"
     }
 
     var body: some View {
         HStack(spacing: 8) {
-            TextField("Type a command (e.g. \"add set\", \"modify set\")", text: $inputText)
-                .textFieldStyle(.roundedBorder)
+            TextField("cmd >", text: $inputText)
                 .font(.system(.footnote, design: .monospaced))
+                .textFieldStyle(.plain)
+                .onSubmit { runCommand() }
+                .disabled(isProcessing)
 
-            if let emoji = statusEmoji {
-                Text(emoji)
-                    .font(.system(size: 18))
+            if isProcessing {
+                // Minimal unix spinner style (ASCII)
+                Text("[ … ]")
+                    .font(.system(.footnote, design: .monospaced))
+                    .foregroundColor(.secondary)
                     .transition(.opacity)
-                    .accessibilityLabel("Command status")
+            } else if let emoji = statusEmoji {
+                Text(emoji)
+                    .font(.system(size: 16))
+                    .transition(.opacity)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.1))
     }
-}
 
-#Preview {
-    VStack {
-        Spacer()
-        CommandInputBar()
+    @MainActor
+    private func runCommand() {
+        guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        isProcessing = true
+        let cmd = inputText
+
+        Task {
+            // Call your async Session function
+            _ = try? await session.addSetFromString(input: cmd)
+
+            // when done
+            await MainActor.run {
+                inputText = ""
+                isProcessing = false
+            }
+        }
     }
-    .preferredColorScheme(.dark)
 }

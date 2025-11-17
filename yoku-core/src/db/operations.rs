@@ -42,7 +42,7 @@ fn slugify(name: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-pub async fn create_workout_session(
+pub fn create_workout_session(
     conn: &mut SqliteConnection,
     user_id: Option<i32>,
     name: Option<String>,
@@ -54,10 +54,7 @@ pub async fn create_workout_session(
         user_id, name, duration_seconds
     );
 
-    let date = chrono::Utc::now()
-        .date_naive()
-        .format("%Y-%m-%d")
-        .to_string();
+    let date = chrono::Utc::now().date_naive().to_string();
     let dur_secs = duration_seconds.unwrap_or(0);
 
     let new = NewWorkoutSession {
@@ -81,10 +78,7 @@ pub async fn create_workout_session(
     Ok(res)
 }
 
-pub async fn get_workout_session(
-    conn: &mut SqliteConnection,
-    session_id: i32,
-) -> Result<WorkoutSession> {
+pub fn get_workout_session(conn: &mut SqliteConnection, session_id: i32) -> Result<WorkoutSession> {
     debug!("get_workout_session called session_id={}", session_id);
 
     workout_sessions::table
@@ -96,7 +90,7 @@ pub async fn get_workout_session(
         })
 }
 
-pub async fn get_all_workout_sessions(conn: &mut SqliteConnection) -> Result<Vec<WorkoutSession>> {
+pub fn get_all_workout_sessions(conn: &mut SqliteConnection) -> Result<Vec<WorkoutSession>> {
     debug!("get_all_workout_sessions called");
 
     workout_sessions::table
@@ -107,7 +101,7 @@ pub async fn get_all_workout_sessions(conn: &mut SqliteConnection) -> Result<Vec
         })
 }
 
-pub async fn delete_workout_session(conn: &mut SqliteConnection, session_id: i32) -> Result<usize> {
+pub fn delete_workout_session(conn: &mut SqliteConnection, session_id: i32) -> Result<usize> {
     debug!("delete_workout_session called session_id={}", session_id);
 
     diesel::delete(workout_sessions::table.find(session_id))
@@ -118,7 +112,7 @@ pub async fn delete_workout_session(conn: &mut SqliteConnection, session_id: i32
         })
 }
 
-pub async fn get_exercise(conn: &mut SqliteConnection, exercise_id: i32) -> Result<Exercise> {
+pub fn get_exercise(conn: &mut SqliteConnection, exercise_id: i32) -> Result<Exercise> {
     debug!("get_exercise called exercise_id={}", exercise_id);
 
     exercises::table
@@ -130,7 +124,7 @@ pub async fn get_exercise(conn: &mut SqliteConnection, exercise_id: i32) -> Resu
         })
 }
 
-pub async fn get_all_exercises(conn: &mut SqliteConnection) -> Result<Vec<Exercise>> {
+pub fn get_all_exercises(conn: &mut SqliteConnection) -> Result<Vec<Exercise>> {
     debug!("get_all_exercises called");
     exercises::table.load::<Exercise>(conn).map_err(|e| {
         warn!("get_all_exercises failed: {}", e);
@@ -138,7 +132,7 @@ pub async fn get_all_exercises(conn: &mut SqliteConnection) -> Result<Vec<Exerci
     })
 }
 
-pub async fn get_or_create_exercise(
+pub fn get_or_create_exercise(
     conn: &mut SqliteConnection,
     exercise_name: &str,
 ) -> Result<Exercise> {
@@ -178,10 +172,7 @@ pub async fn get_or_create_exercise(
     Ok(created)
 }
 
-pub async fn get_or_create_muscle(
-    conn: &mut SqliteConnection,
-    muscle_name: &str,
-) -> Result<Muscle> {
+pub fn get_or_create_muscle(conn: &mut SqliteConnection, muscle_name: &str) -> Result<Muscle> {
     debug!("get_or_create_muscle called name={}", muscle_name);
 
     if let Ok(muscle) = muscles::table
@@ -214,7 +205,7 @@ pub async fn get_or_create_muscle(
     Ok(created)
 }
 
-pub async fn get_or_create_user(conn: &mut SqliteConnection, username: &str) -> Result<User> {
+pub fn get_or_create_user(conn: &mut SqliteConnection, username: &str) -> Result<User> {
     use crate::db::schema::users::dsl as users_dsl;
 
     debug!("get_or_create_user called username={}", username);
@@ -246,7 +237,7 @@ pub async fn get_or_create_user(conn: &mut SqliteConnection, username: &str) -> 
     Ok(created)
 }
 
-pub async fn create_request_string(
+pub fn create_request_string(
     conn: &mut SqliteConnection,
     user_id: i32,
     input: String,
@@ -274,7 +265,7 @@ pub async fn create_request_string(
         })
 }
 
-pub async fn create_request_string_for_username(
+pub fn create_request_string_for_username(
     conn: &mut SqliteConnection,
     username: &str,
     input: String,
@@ -283,11 +274,11 @@ pub async fn create_request_string_for_username(
         "create_request_string_for_username called username={}",
         username
     );
-    let user = get_or_create_user(conn, username).await?;
-    create_request_string(conn, user.id, input).await
+    let user = get_or_create_user(conn, username)?;
+    create_request_string(conn, user.id, input)
 }
 
-pub async fn add_workout_set(
+pub fn add_workout_set(
     conn: &mut SqliteConnection,
     session_id: &i32,
     exercise_id: &i32,
@@ -340,7 +331,7 @@ pub async fn add_workout_set(
     Ok(created)
 }
 
-pub async fn add_multiple_sets_to_workout(
+pub fn add_multiple_sets_to_workout(
     conn: &mut SqliteConnection,
     session_id: &i32,
     exercise_id: &i32,
@@ -399,7 +390,7 @@ pub async fn add_multiple_sets_to_workout(
     Ok(created)
 }
 
-pub async fn get_sets_for_session(
+pub fn get_sets_for_session(
     conn: &mut SqliteConnection,
     session_id: i32,
 ) -> Result<Vec<WorkoutSet>> {
@@ -417,7 +408,7 @@ pub async fn get_sets_for_session(
         })
 }
 
-pub async fn update_workout_set(
+pub fn update_workout_set(
     conn: &mut SqliteConnection,
     set_id: i32,
     update: &UpdateWorkoutSet,
@@ -432,7 +423,7 @@ pub async fn update_workout_set(
         })
 }
 
-pub async fn update_workout_set_from_parsed(
+pub fn update_workout_set_from_parsed(
     conn: &mut SqliteConnection,
     set_id: i32,
     parsed: &ParsedSet,
@@ -450,7 +441,7 @@ pub async fn update_workout_set_from_parsed(
         })?;
 
     let exercise_id_opt = if !parsed.exercise.is_empty() {
-        let exercise = get_or_create_exercise(conn, &parsed.exercise).await?;
+        let exercise = get_or_create_exercise(conn, &parsed.exercise)?;
         if exercise.id != original.exercise_id {
             Some(exercise.id)
         } else {
@@ -483,7 +474,7 @@ pub async fn update_workout_set_from_parsed(
         })
 }
 
-pub async fn delete_workout_set(conn: &mut SqliteConnection, set_id: i32) -> Result<usize> {
+pub fn delete_workout_set(conn: &mut SqliteConnection, set_id: i32) -> Result<usize> {
     debug!("delete_workout_set called set_id={}", set_id);
     diesel::delete(workout_sets::table.find(set_id))
         .execute(conn)
