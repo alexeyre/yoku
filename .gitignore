@@ -27,3 +27,5 @@ yoku-core/generated
 yoku-core/YokuUniffi
 
 .DS_Store
+
+.sqlx/

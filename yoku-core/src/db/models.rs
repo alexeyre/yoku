@@ -78,6 +78,7 @@ pub struct WorkoutSession {
     pub date: String,
     pub duration_seconds: i64,
     pub notes: Option<String>,
+    pub intention: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

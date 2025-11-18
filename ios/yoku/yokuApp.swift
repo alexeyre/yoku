@@ -27,9 +27,9 @@ struct yokuApp: App {
                 } else if let error = setupError {
                     VStack(spacing: 12) {
                         Text("Failed to set up database")
-                            .font(.headline)
+                            .font(.appBody)
                         Text(error.localizedDescription)
-                            .font(.subheadline)
+                            .font(.appCaption2)
                             .foregroundStyle(.secondary)
                         ProgressView().opacity(0)  // keep layout consistent
                     }
@@ -39,7 +39,7 @@ struct yokuApp: App {
                     VStack(spacing: 12) {
                         ProgressView("Preparing database…")
                         Text("Please wait")
-                            .font(.footnote)
+                            .font(.appBody)
                             .foregroundStyle(.secondary)
                     }
                     .padding()
@@ -68,7 +68,7 @@ struct yokuApp: App {
                     let dbPath = dbURL.path
                     lastDBPath = dbPath
 
-                    try await session.setup(dbPath: dbPath, model: "gpt-5-mini")
+                    try await session.setup(dbPath: dbPath, model: "gpt-5-mini", fastModel: "gpt-5-nano")
                     isDatabaseReady = true
                 } catch {
                     setupError = error
@@ -102,114 +102,156 @@ private struct RootView: View {
 
     var body: some View {
         NavigationStack {
-            VStack {
-                // Workouts list
+            VStack(spacing: 0) {
+                // Header with buttons
+                HStack(spacing: 16) {
+                    Button {
+                        Task {
+                            await createNewWorkoutAndNavigate()
+                        }
+                    } label: {
+                        if isPerformingSelection {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                        Text("[ NEW ]")
+                            .font(.appButton)
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isPerformingSelection)
+
+                    Button {
+                        Task { @MainActor in
+                            do {
+                                try await session.resetDatabase()
+                                await loadWorkouts()
+                            } catch {
+                                loadError = error
+                            }
+                        }
+                    } label: {
+                        Text("[ RESET ]")
+                            .font(.appButton)
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Text("[ SETTINGS ]")
+                            .font(.appButton)
+                            .foregroundStyle(.primary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Settings")
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+                .padding(.bottom, 4)
+
+                // Minimal divider
+                Rectangle()
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(height: 0.5)
+
+                // Workouts list - minimal styling
                 List {
                     if let error = loadError {
-                        Section {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Failed to load workouts")
-                                    .font(.headline)
-                                Text(error.localizedDescription)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 4)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("ERROR: Failed to load workouts")
+                                .font(.appBody)
+                            Text(error.localizedDescription)
+                                .font(.appCaption2)
+                                .foregroundStyle(.secondary)
                         }
+                        .padding(.vertical, 4)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                     }
 
                     if isLoading && workoutSessionList.isEmpty {
-                        Section {
-                            ProgressView("Loading workouts…")
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Loading…")
+                                .font(.appBody)
                         }
+                        .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                     } else if workoutSessionList.isEmpty {
-                        Section {
-                            Text("No workouts yet")
-                                .foregroundStyle(.secondary)
-                        }
+                        Text("No workouts")
+                            .font(.appBody)
+                            .foregroundStyle(.secondary)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                     } else {
-                        Section {
-                            ForEach(workoutSessionList.indices, id: \.self) { i in
-                                let ws = workoutSessionList[i]
-                                Button {
-                                    Task {
-                                        await selectExistingWorkoutAndNavigate(ws)
-                                    }
+                        ForEach(workoutSessionList.indices, id: \.self) { i in
+                            let ws = workoutSessionList[i]
+                            Button {
+                                Task {
+                                    await selectExistingWorkoutAndNavigate(ws)
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(workoutTitle(from: ws))
+                                        .font(.appBody)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(ws.date())
+                                        .font(.appCaption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 2)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isPerformingSelection)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    deleteWorkout(ws)
                                 } label: {
-                                    HStack {
-                                        VStack(alignment: .leading) {
-                                            Text(workoutTitle(from: ws))
-                                                .font(.headline)
-                                            if let subtitle = workoutSubtitle(from: ws) {
-                                                Text(subtitle)
-                                                    .font(.subheadline)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                        }
-                                        Spacer()
-                                        Text(ws.date())
-                                    }
+                                    Text("DEL")
+                                        .font(.appCaption)
                                 }
-                                .disabled(isPerformingSelection)
+                                .tint(.red.opacity(0.8))
                             }
-                        }
-                        Button {
-                            Task { @MainActor in
-                                do {
-                                    try await session.resetDatabase()
-                                    await loadWorkouts()
-                                } catch {
-                                    loadError = error
-                                }
-                            }
-                        } label: {
-                            Text("Reset database")
                         }
                     }
 
                     if let selErr = selectionError {
-                        Section {
-                            Text("Selection failed: \(selErr.localizedDescription)")
-                                .font(.footnote)
-                                .foregroundStyle(.red)
-                        }
+                        Text("ERROR: \(selErr.localizedDescription)")
+                            .font(.appBody)
+                            .foregroundStyle(.red)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                     }
                 }
-                .listStyle(.insetGrouped)
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
                 .refreshable {
                     // Avoid FFI in previews
                     if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" {
                         await loadWorkouts()
                     }
                 }
-
-                // Start New Workout button
-                Button {
-                    Task {
-                        await createNewWorkoutAndNavigate()
-                    }
-                } label: {
-                    if isPerformingSelection {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Text("Start New Workout")
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isPerformingSelection)
-                .padding()
             }
-            .navigationTitle("Workouts")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Settings")
+                ToolbarItem(placement: .principal) {
+                    Text("WORKOUTS")
+                        .font(.appBody)
                 }
             }
             .sheet(isPresented: $showSettings) {
@@ -278,6 +320,38 @@ private struct RootView: View {
             selectionError = error
         }
         isPerformingSelection = false
+    }
+
+    // MARK: - Delete handler
+
+    @MainActor
+    private func deleteWorkouts(at offsets: IndexSet) {
+        Task {
+            for index in offsets {
+                guard index < workoutSessionList.count else { continue }
+                let workout = workoutSessionList[index]
+                do {
+                    _ = try await session.deleteWorkout(id: workout.id())
+                } catch {
+                    loadError = error
+                }
+            }
+            // Reload the list once after all deletions to reflect current state
+            await loadWorkouts()
+        }
+    }
+    
+    // Helper for swipe delete action
+    @MainActor
+    private func deleteWorkout(_ workout: YokuUniffi.WorkoutSession) {
+        Task {
+            do {
+                _ = try await session.deleteWorkout(id: workout.id())
+                await loadWorkouts()
+            } catch {
+                loadError = error
+            }
+        }
     }
 
     // MARK: - Placeholder formatting helpers

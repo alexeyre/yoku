@@ -534,6 +534,90 @@ impl PromptBuilder {
         );
         base + &ex_block
     }
+
+    pub fn system_input_classification_prompt(&self) -> String {
+        "You are a classifier for workout app commands. Determine if the user input is a workout intention/goal or a set to add. Return JSON with 'input_type' field: 'intention' if it's a workout goal/intention (e.g., 'I want to build muscle', 'focus on upper body', 'hypertrophy workout'), or 'set' if it's a set to log (e.g., 'bench press 100kg x 5', 'add 3 sets of squats'). Return only JSON: {\"input_type\": \"intention\" | \"set\"}".to_string()
+    }
+
+    pub fn user_input_classification_prompt(&self, input: &str) -> String {
+        format!("Classify this user input: \"{}\"", input)
+    }
+
+    pub fn system_suggestion_prompt(&self) -> String {
+        r#"You are an expert fitness coach providing actionable workout suggestions. Your suggestions must be SPECIFIC and ACTIONABLE, not vague general advice.
+
+Return a JSON object with a 'suggestions' array. Each suggestion should have:
+- 'title' (string): A specific, actionable suggestion
+- 'subtitle' (optional string): Additional context or details
+- 'suggestion_type' (one of: 'exercise', 'progression', 'volume', 'accessory', 'completion')
+- 'exercise_name' (optional string): For exercise or progression suggestions, specify the exercise name
+- 'reasoning' (optional string): Brief explanation
+
+CRITICAL: Avoid vague suggestions like "do progressive overload" or "focus on form". Instead, provide specific, actionable recommendations.
+
+GOOD EXAMPLES:
+1. Exercise recommendation:
+   {"title": "Add Barbell Rows", "subtitle": "3 sets of 8-10 reps @7-8 RPE", "suggestion_type": "exercise", "exercise_name": "Barbell Row", "reasoning": "Balances the pressing work you've done"}
+
+2. Specific progression:
+   {"title": "Increase Bench Press to 87.5kg", "subtitle": "You've been doing 85kg x 5, try 87.5kg x 4-5 @8 RPE", "suggestion_type": "progression", "exercise_name": "Bench Press", "reasoning": "2.5kg increase based on your recent performance"}
+
+3. Workout completion:
+   {"title": "Consider wrapping up", "subtitle": "You've done 4 heavy compounds and 3 accessories - good volume for today", "suggestion_type": "completion", "reasoning": "High volume and intensity already achieved"}
+
+4. Volume adjustment:
+   {"title": "Add 1 more set to Squats", "subtitle": "You did 3 sets, add a 4th at 90% of your working weight", "suggestion_type": "volume", "exercise_name": "Barbell Back Squat", "reasoning": "Room for more volume based on RPE"}
+
+BAD EXAMPLES (DO NOT DO THIS):
+- {"title": "Do progressive overload"} - Too vague
+- {"title": "Focus on form"} - Not actionable
+- {"title": "Add more volume"} - Not specific
+- {"title": "Try a new exercise"} - Doesn't specify which
+
+GUIDELINES:
+- For exercise suggestions: Always specify the exercise name and provide rep/set/RPE guidance
+- For progression suggestions: Specify exact weight/rep changes based on past performance
+- For completion suggestions: Use when workout is already very taxing (high volume, high intensity, or user seems fatigued)
+- For volume suggestions: Specify exactly how many sets/reps to add
+- Base all suggestions on the actual past performance data provided
+- Consider workout intention if provided
+- Balance muscle groups appropriately
+
+Return only valid JSON."#.to_string()
+    }
+
+    pub fn user_suggestion_prompt(
+        &self,
+        current_exercises: &[(String, i64)], // (exercise_name, set_count)
+        intention: Option<&str>,
+        past_performance: &str, // Summary of past performance
+    ) -> String {
+        let exercises_list: String = current_exercises
+            .iter()
+            .map(|(name, count)| format!("- {} ({} sets)", name, count))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let intention_section = if let Some(intent) = intention {
+            format!("\nWorkout Intention: {}\n", intent)
+        } else {
+            String::new()
+        };
+
+        let total_sets: i64 = current_exercises.iter().map(|(_, count)| count).sum();
+        let workout_intensity_note = if total_sets > 15 {
+            "\nNOTE: This workout already has significant volume. Consider whether to suggest completion or lighter accessory work.\n"
+        } else if current_exercises.is_empty() {
+            "\nNOTE: Workout just starting. Focus on exercise recommendations based on intention.\n"
+        } else {
+            "\nNOTE: Room for more work. Consider progression on current exercises or adding complementary exercises.\n"
+        };
+
+        format!(
+            "Current workout:\n{}\n{}Past Performance Summary:\n{}\n{}\nProvide 3-5 SPECIFIC, ACTIONABLE suggestions. For each suggestion:\n\n1. EXERCISE RECOMMENDATIONS: If suggesting a new exercise, specify the exact exercise name, rep range, and RPE (e.g., \"Add Barbell Rows: 3 sets of 8-10 reps @7-8 RPE\")\n\n2. PROGRESSION SUGGESTIONS: If suggesting progression on an existing exercise, specify:\n   - Exact weight change (e.g., \"Increase Bench Press from 85kg to 87.5kg\")\n   - Rep range (e.g., \"Try 4-5 reps @8 RPE\")\n   - Base this on the past performance data provided\n\n3. COMPLETION SUGGESTIONS: If the workout is already very taxing (high volume, high intensity, or user appears fatigued), suggest wrapping up with a completion-type suggestion\n\n4. VOLUME SUGGESTIONS: If suggesting more volume, specify exactly how many sets/reps to add (e.g., \"Add 1 more set to Squats at 90% working weight\")\n\nBase all suggestions on the actual past performance data. Be specific with weights, reps, and RPE ranges. Avoid vague advice.\n\nReturn JSON with a 'suggestions' array.",
+            exercises_list, intention_section, past_performance, workout_intensity_note
+        )
+    }
 }
 
 pub async fn parse_set_string(
@@ -597,6 +681,72 @@ pub async fn generate_exercise_to_equipment_and_muscles(
         res.related_exercises.len()
     );
     Ok((res.equipment, res.muscles, res.related_exercises))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkoutSuggestion {
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub suggestion_type: String, // "exercise", "progression", "volume", "accessory"
+    pub exercise_name: Option<String>,
+    pub reasoning: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum InputType {
+    #[serde(rename = "intention")]
+    Intention,
+    #[serde(rename = "set")]
+    Set,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputClassification {
+    pub input_type: InputType,
+}
+
+pub async fn classify_input_type(
+    llm: &LlmInterface,
+    builder: &PromptBuilder,
+    input: &str,
+) -> Result<InputType> {
+    debug!("classify_input_type called input_len={}", input.len());
+    let system = builder.system_input_classification_prompt();
+    let user = builder.user_input_classification_prompt(input);
+    let classification: InputClassification = llm.call_json(&system, &user).await?;
+    info!(
+        "classify_input_type classified as {:?}",
+        classification.input_type
+    );
+    Ok(classification.input_type)
+}
+
+pub async fn generate_workout_suggestions(
+    llm: &LlmInterface,
+    builder: &PromptBuilder,
+    current_exercises: &[(String, i64)],
+    intention: Option<&str>,
+    past_performance: &str,
+) -> Result<Vec<WorkoutSuggestion>> {
+    debug!(
+        "generate_workout_suggestions called exercises={} intention={:?}",
+        current_exercises.len(),
+        intention
+    );
+    let system = builder.system_suggestion_prompt();
+    let user = builder.user_suggestion_prompt(current_exercises, intention, past_performance);
+
+    #[derive(Deserialize)]
+    struct ResShape {
+        suggestions: Vec<WorkoutSuggestion>,
+    }
+
+    let res: ResShape = llm.call_json(&system, &user).await?;
+    info!(
+        "generate_workout_suggestions returned {} suggestions",
+        res.suggestions.len()
+    );
+    Ok(res.suggestions)
 }
 
 #[cfg(test)]

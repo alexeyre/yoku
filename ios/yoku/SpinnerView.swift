@@ -24,7 +24,7 @@ struct SpinnerView: View {
 
     var body: some View {
         Text(text)
-            .font(.system(.footnote, design: .monospaced))
+            .font(.appBody)
             .foregroundColor(.secondary)
             .onAppear { start() }
             .onDisappear { stop() }
@@ -57,7 +57,7 @@ struct SpinnerView: View {
         ForEach(LoadingStyle.allCases) { style in
             HStack(spacing: 12) {
                 Text(style.displayName)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.appCaption)
                     .frame(width: 80, alignment: .leading)
                 SpinnerView(style: style)
             }

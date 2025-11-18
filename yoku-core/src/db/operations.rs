@@ -54,15 +54,16 @@ pub async fn create_workout_session(
     let now = chrono::Utc::now().timestamp();
 
     let res = sqlx::query_as::<_, WorkoutSession>(
-        "INSERT INTO workout_sessions (user_id, name, date, duration_seconds, notes, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
-         RETURNING id, user_id, name, date, duration_seconds, notes, created_at, updated_at"
+        "INSERT INTO workout_sessions (user_id, name, date, duration_seconds, notes, intention, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+         RETURNING id, user_id, name, date, duration_seconds, notes, intention, created_at, updated_at"
     )
     .bind(user_id)
     .bind(name)
     .bind(date)
     .bind(dur_secs)
     .bind(notes)
+    .bind(None::<String>)
     .bind(now)
     .fetch_one(pool)
     .await
@@ -79,7 +80,7 @@ pub async fn get_workout_session(pool: &SqlitePool, session_id: i64) -> Result<W
     debug!("get_workout_session called session_id={}", session_id);
 
     sqlx::query_as::<_, WorkoutSession>(
-        "SELECT id, user_id, name, date, duration_seconds, notes, created_at, updated_at
+        "SELECT id, user_id, name, date, duration_seconds, notes, intention, created_at, updated_at
          FROM workout_sessions WHERE id = ?1"
     )
     .bind(session_id)
@@ -95,7 +96,7 @@ pub async fn get_all_workout_sessions(pool: &SqlitePool) -> Result<Vec<WorkoutSe
     debug!("get_all_workout_sessions called");
 
     sqlx::query_as::<_, WorkoutSession>(
-        "SELECT id, user_id, name, date, duration_seconds, notes, created_at, updated_at
+        "SELECT id, user_id, name, date, duration_seconds, notes, intention, created_at, updated_at
          FROM workout_sessions"
     )
     .fetch_all(pool)
@@ -104,6 +105,37 @@ pub async fn get_all_workout_sessions(pool: &SqlitePool) -> Result<Vec<WorkoutSe
         warn!("get_all_workout_sessions failed: {}", e);
         anyhow::Error::from(e)
     })
+}
+
+pub async fn update_workout_intention(
+    pool: &SqlitePool,
+    session_id: i64,
+    intention: Option<String>,
+) -> Result<()> {
+    debug!(
+        "update_workout_intention called session_id={} intention={:?}",
+        session_id, intention
+    );
+
+    let now = chrono::Utc::now().timestamp();
+    sqlx::query(
+        "UPDATE workout_sessions SET intention = ?1, updated_at = ?2 WHERE id = ?3"
+    )
+    .bind(intention)
+    .bind(now)
+    .bind(session_id)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        error!(
+            "update_workout_intention failed for session_id {}: {}",
+            session_id, e
+        );
+        anyhow::Error::from(e)
+    })?;
+
+    info!("updated workout intention for session_id={}", session_id);
+    Ok(())
 }
 
 pub async fn delete_workout_session(pool: &SqlitePool, session_id: i64) -> Result<u64> {

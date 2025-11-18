@@ -4,6 +4,7 @@ enum LoadingStyle: String, CaseIterable, Identifiable {
     case normal
     case glitchy
     case orbiting
+    case arrows
 
     var id: String { rawValue }
 
@@ -12,6 +13,7 @@ enum LoadingStyle: String, CaseIterable, Identifiable {
         case .normal: return "Normal"
         case .glitchy: return "Glitchy"
         case .orbiting: return "Orbiting"
+        case .arrows: return "Arrows"
         }
     }
 
@@ -41,6 +43,22 @@ enum LoadingStyle: String, CaseIterable, Identifiable {
                 "⠰", // bottom-left
                 "⠤", // left
                 "⠄"  // top-left
+            ]
+            
+        case .arrows:
+            return [
+                "[====]",
+                "[>===]",
+                "[>>==]",
+                "[=>>=]",
+                "[==>>]",
+                "[===>]",
+                "[====]",
+                "[===<]",
+                "[==<<]",
+                "[=<<=]",
+                "[<<==]",
+                "[<===]",
             ]
 
         case .glitchy:

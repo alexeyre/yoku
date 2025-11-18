@@ -52,25 +52,28 @@ struct InformationHeader: View {
                         dismiss()
                     } label: {
                         Text("[ STOP ]")
-                            .font(.system(.footnote, design: .monospaced))
-                            .foregroundColor(.red)
+                            .font(.appButton)
+                            .foregroundStyle(.red)
                     }
+                    .buttonStyle(.plain)
 
                     Button {
                     } label: {
                         Text(workoutState.isTimerRunning ? "[ PAUSE ]" : "[ RESUME ]")
-                            .font(.system(.footnote, design: .monospaced))
-                            .foregroundColor(.primary)
+                            .font(.appButton)
+                            .foregroundStyle(.primary)
                     }
+                    .buttonStyle(.plain)
 
                     Spacer()
 
                     Button {
                     } label: {
                         Text("[ NEXT ]")
-                            .font(.system(.footnote, design: .monospaced))
-                            .foregroundColor(.primary)
+                            .font(.appButton)
+                            .foregroundStyle(.primary)
                     }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 6)
@@ -104,7 +107,7 @@ struct InformationHeader: View {
                     .fill(Color.primary.opacity(0.08))
                     .frame(height: 0.5)
             }
-            .font(.system(.footnote, design: .monospaced))
+            .font(.appBody)
             .padding(.horizontal, 12)
             // Reduced bottom padding to pull the summary closer
             .padding(.top, 6)

@@ -5,30 +5,16 @@ struct CommandInputBar: View {
     @State private var isProcessing: Bool = false
     @EnvironmentObject var session: Session
 
-    private var statusEmoji: String? {
-        guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return nil
-        }
-        let lower = inputText.lowercased()
-        if lower.contains("add") { return "➕" }
-        if lower.contains("modify") { return "✏️" }
-        return "❓"
-    }
-
     var body: some View {
         HStack(spacing: 8) {
             TextField("cmd >", text: $inputText)
-                .font(.system(.footnote, design: .monospaced))
+                .font(.appBody)
                 .textFieldStyle(.plain)
                 .onSubmit { runCommand() }
                 .disabled(isProcessing)
 
             if isProcessing {
                 SpinnerView()
-                    .transition(.opacity)
-            } else if let emoji = statusEmoji {
-                Text(emoji)
-                    .font(.system(size: 16))
                     .transition(.opacity)
             }
         }
@@ -45,7 +31,8 @@ struct CommandInputBar: View {
         let cmd = inputText
 
         Task {
-            _ = try? await session.addSetFromString(input: cmd)
+            // Use the backend to classify and process the input intelligently
+            _ = try? await session.classifyAndProcessInput(input: cmd)
             await MainActor.run {
                 inputText = ""
                 isProcessing = false

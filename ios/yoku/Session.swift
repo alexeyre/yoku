@@ -28,13 +28,17 @@ struct ExerciseSetModel: Identifiable, Hashable {
     var label: String
     let weight: Double
     let reps: Int64
+    let rpe: Double?
+    let notes: String?
 
-    init(id: UUID = UUID(), backendID: Int64? = nil, label: String, weight: Double, reps: Int64) {
+    init(id: UUID = UUID(), backendID: Int64? = nil, label: String, weight: Double, reps: Int64, rpe: Double? = nil, notes: String? = nil) {
         self.id = id
         self.backendID = backendID
         self.label = label
         self.weight = weight
         self.reps = reps
+        self.rpe = rpe
+        self.notes = notes
     }
 }
 
@@ -76,7 +80,7 @@ final class Session: ObservableObject {
     @Published var lastError: Error?
 
     // New: lifts map keyed by backend exercise id
-    @Published private(set) var liftsByExerciseId: [Int64: [Double]] = [:]
+    @Published private(set) var liftsByExerciseId: [Int64: [(Date, Double)]] = [:]
 
     private let backend = BackendSessionCoordinator()
     private var timerCancellable: AnyCancellable?
@@ -85,9 +89,9 @@ final class Session: ObservableObject {
 
     init() {}
 
-    func setup(dbPath: String, model: String) async throws {
+    func setup(dbPath: String, model: String, fastModel: String) async throws {
         do {
-            let snapshot = try await backend.setup(dbPath: dbPath, model: model)
+            let snapshot = try await backend.setup(dbPath: dbPath, model: model, fastModel: fastModel)
             apply(snapshot: snapshot)
             lastError = nil
         } catch {
@@ -101,6 +105,56 @@ final class Session: ObservableObject {
         guard !trimmed.isEmpty else { return }
         do {
             let snapshot = try await backend.addSetFromString(trimmed)
+            apply(snapshot: snapshot)
+            lastError = nil
+        } catch {
+            lastError = error
+            throw mapCoordinatorError(error)
+        }
+    }
+    
+    func updateWorkoutSet(id: Int64, weight: Double, reps: Int64) async throws {
+        let snapshot = try await backend.updateWorkoutSet(id, weight: weight, reps: reps)
+        apply(snapshot: snapshot)
+    }
+    
+    func setWorkoutIntention(intention: String?) async throws {
+        do {
+            try await backend.setWorkoutIntention(intention: intention)
+            // Refresh to get updated workout session
+            let snapshot = try await backend.snapshot()
+            apply(snapshot: snapshot)
+            lastError = nil
+        } catch {
+            lastError = error
+            throw mapCoordinatorError(error)
+        }
+    }
+
+    func getWorkoutSuggestions() async throws -> [YokuUniffi.WorkoutSuggestion] {
+        do {
+            return try await backend.getWorkoutSuggestions()
+        } catch {
+            lastError = error
+            throw mapCoordinatorError(error)
+        }
+    }
+    
+    func deleteWorkout(id: Int64) async throws {
+        let snapshot = try await backend.deleteWorkout(id)
+        apply(snapshot: snapshot)
+    }
+    
+    func deleteSet(id: Int64) async throws {
+        let snapshot = try await backend.deleteSet(id)
+        apply(snapshot: snapshot)
+    }
+
+    func classifyAndProcessInput(input: String) async throws {
+        do {
+            try await backend.classifyAndProcessInput(input: input)
+            // Refresh to get updated state
+            let snapshot = try await backend.snapshot()
             apply(snapshot: snapshot)
             lastError = nil
         } catch {
@@ -247,13 +301,13 @@ final class Session: ObservableObject {
         }
     }
 
-    func dataSeries(for exercise: ExerciseModel?) -> [Int] {
+    func dataSeries(for exercise: ExerciseModel?) -> [(Date, Double)] {
         guard let exercise else { return [] }
         // Use the fetched lifts by backend id, map to Ints for charting
         if let backendID = exercise.backendID,
             let lifts = liftsByExerciseId[backendID]
         {
-            return lifts.map { Int($0) }
+            return lifts
         }
         return []
     }
@@ -301,8 +355,10 @@ final class Session: ObservableObject {
                 let label = "Set \(backendSet.id())"
                 let weight = backendSet.weight()
                 let reps = backendSet.reps()
+                let rpe = backendSet.rpe()
+                let notes = backendSet.notes()
                 return ExerciseSetModel(
-                    id: setUUID, backendID: backendSetID, label: label, weight: weight, reps: reps)
+                    id: setUUID, backendID: backendSetID, label: label, weight: weight, reps: reps, rpe: rpe, notes: notes)
             }
 
             let model = ExerciseModel(
@@ -409,7 +465,7 @@ private actor BackendSessionCoordinator {
         let workout: YokuUniffi.WorkoutSession?
         let exercises: [YokuUniffi.Exercise]
         let sets: [YokuUniffi.WorkoutSet]
-        let liftsByExerciseId: [Int64: [Double]]
+        let liftsByExerciseId: [Int64: [(Date, Double)]]
     }
 
     enum CoordinatorError: LocalizedError {
@@ -426,19 +482,22 @@ private actor BackendSessionCoordinator {
     private var session: YokuUniffi.Session?
     private var databasePath: String?
     private var model: String?
+    private var fastModel: String?
 
-    func setup(dbPath: String, model: String) async throws -> Snapshot {
+    func setup(dbPath: String, model: String, fastModel: String) async throws -> Snapshot {
         if let current = session,
             databasePath == dbPath,
-            self.model == model
+            self.model == model,
+            self.fastModel == fastModel
         {
             return try await snapshot(for: current)
         }
 
-        let created = try await YokuUniffi.createSession(dbPath: dbPath, model: model)
+        let created = try await YokuUniffi.createSession(dbPath: dbPath, model: model, fastModel: fastModel)
         session = created
         databasePath = dbPath
         self.model = model
+        self.fastModel = fastModel
         return try await snapshot(for: created)
     }
 
@@ -459,10 +518,28 @@ private actor BackendSessionCoordinator {
         return try await snapshot(for: session)
     }
 
-    func getLiftsForExercise(_ id: Int64) async throws -> [Double] {
+    func getLiftsForExercise(_ id: Int64) async throws -> [YokuUniffi.LiftDataPoint] {
         let session = try requireSession()
         return try await YokuUniffi.getLiftsForExercise(
             session: session, exerciseId: id, limit: 100)
+    }
+    
+    func deleteWorkout(_ id: Int64) async throws -> Snapshot {
+        let session = try requireSession()
+        let _ = try await YokuUniffi.deleteWorkout(session: session, id: id)
+        return try await snapshot(for: session)
+    }
+    
+    func deleteSet(_ id: Int64) async throws -> Snapshot {
+        let session = try requireSession()
+        let _ = try await YokuUniffi.deleteSetFromWorkout(session: session, id: id)
+        return try await snapshot(for: session)
+    }
+    
+    func updateWorkoutSet(_ id: Int64, weight: Double, reps: Int64) async throws -> Snapshot {
+        let session = try requireSession()
+        let _ = try await YokuUniffi.updateWorkoutSet(session: session, setId: id, reps: reps, weight: weight)
+        return try await snapshot(for: session)
     }
 
     func createBlankWorkoutSession() async throws -> Snapshot {
@@ -482,6 +559,22 @@ private actor BackendSessionCoordinator {
         return try await YokuUniffi.getAllWorkoutSessions(session: session)
     }
 
+    func setWorkoutIntention(intention: String?) async throws {
+        let session = try requireSession()
+        try await YokuUniffi.setWorkoutIntention(session: session, intention: intention)
+    }
+
+    func getWorkoutSuggestions() async throws -> [YokuUniffi.WorkoutSuggestion] {
+        let session = try requireSession()
+        return try await YokuUniffi.getWorkoutSuggestions(session: session)
+    }
+
+    func classifyAndProcessInput(input: String) async throws -> Snapshot {
+        let session = try requireSession()
+        try await YokuUniffi.classifyAndProcessInput(session: session, input: input)
+        return try await snapshot(for: session)
+    }
+
     private func snapshot(for session: YokuUniffi.Session) async throws -> Snapshot {
         async let workoutTask = YokuUniffi.getSessionWorkoutSession(session: session)
         async let exercisesTask = YokuUniffi.getAllExercises(session: session)
@@ -492,14 +585,15 @@ private actor BackendSessionCoordinator {
         let sets = (try? await setsTask) ?? []
 
         // Concurrently fetch lifts for each exercise (best-effort)
-        let liftsByExerciseId: [Int64: [Double]] = await withTaskGroup(of: (Int64, [Double]?).self) {
+        let liftsByExerciseId: [Int64: [(Date, Double)]] = await withTaskGroup(of: (Int64, [(Date, Double)]?).self) {
             group in
             for ex in exercises {
                 let exId = ex.id()
                 group.addTask {
                     do {
-                        let lifts = try await YokuUniffi.getLiftsForExercise(
+                        let liftDataPoints = try await YokuUniffi.getLiftsForExercise(
                             session: session, exerciseId: exId, limit: 100)
+                        let lifts: [(Date, Double)] = liftDataPoints.map { (Date(timeIntervalSince1970: TimeInterval($0.timestamp())), $0.lift()) }
                         return (exId, lifts)
                     } catch {
                         return (exId, nil)
@@ -507,7 +601,7 @@ private actor BackendSessionCoordinator {
                 }
             }
 
-            var dict: [Int64: [Double]] = [:]
+            var dict: [Int64: [(Date, Double)]] = [:]
             for await (id, lifts) in group {
                 dict[id] = lifts ?? []
             }

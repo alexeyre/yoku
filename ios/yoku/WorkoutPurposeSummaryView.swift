@@ -1,15 +1,20 @@
 import SwiftUI
+import YokuUniffi
 
 struct WorkoutPurposeSummaryView: View {
     @EnvironmentObject var workoutState: Session
     @State private var summary: String = "Analyzing workout…"
+    
+    private var workoutIntention: String? {
+        workoutState.activeWorkoutSession?.intention()
+    }
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "sparkles")
                 .foregroundStyle(.yellow)
             Text(summary)
-                .font(.system(.footnote, design: .monospaced))
+                .font(.appBody)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
@@ -25,11 +30,21 @@ struct WorkoutPurposeSummaryView: View {
         .onChange(of: workoutState.exercises) { _, _ in
             refreshSummary()
         }
+        .onChange(of: workoutIntention) { _, _ in
+            refreshSummary()
+        }
     }
 
     private func refreshSummary() {
-        // Placeholder heuristic: infer a purpose from current exercise names.
-        // Replace this with your real LLM call (async) when available.
+        // Use the workout intention if it exists, otherwise fall back to heuristic
+        if let workoutSession = workoutState.activeWorkoutSession,
+           let intention = workoutSession.intention(),
+           !intention.isEmpty {
+            summary = intention
+            return
+        }
+        
+        // Fallback: infer a purpose from current exercise names
         let names = workoutState.exercises.map { $0.name.lowercased() }
 
         let isUpper = names.contains { $0.contains("bench") || $0.contains("press") || $0.contains("pull") || $0.contains("row") || $0.contains("dip") }
