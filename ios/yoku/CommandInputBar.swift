@@ -6,21 +6,46 @@ struct CommandInputBar: View {
     @EnvironmentObject var session: Session
 
     var body: some View {
-        HStack(spacing: 8) {
-            TextField("cmd >", text: $inputText)
+        ZStack(alignment: .topLeading) {
+            // Multiline text input with left padding for ">" indicator
+            TextEditor(text: $inputText)
                 .font(.appBody)
-                .textFieldStyle(.plain)
-                .onSubmit { runCommand() }
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
+                .frame(minHeight: 20)
                 .disabled(isProcessing)
-
-            if isProcessing {
-                SpinnerView()
-                    .transition(.opacity)
+                .padding(.leading, 12)
+                .onSubmit(runCommand)
+            
+            // Terminal prompt indicator on first line
+            HStack(alignment: .top, spacing: 6) {
+                Text(">")
+                    .font(.appBody)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8) // Align with TextEditor text baseline
+                
+                // Placeholder when empty
+                if inputText.isEmpty {
+                    Text("cmd")
+                        .font(.appBody)
+                        .foregroundStyle(.secondary.opacity(0.6))
+                        .padding(.top, 8)
+                        .allowsHitTesting(false)
+                }
+                
+                Spacer()
+                
+                if isProcessing {
+                    SpinnerView()
+                        .transition(.opacity)
+                        .padding(.top, 4)
+                }
             }
+            .padding(.leading, 4) // Match TextEditor's internal padding
+            .allowsHitTesting(false) // Allow taps to pass through to TextEditor
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color.black.opacity(0.1))
+        .padding(.vertical, 4)
     }
 
     @MainActor

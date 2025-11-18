@@ -159,24 +159,23 @@ private struct RootView: View {
                     .fill(Color.primary.opacity(0.08))
                     .frame(height: 0.5)
 
-                // Workouts list - minimal styling
+                // Workouts list - terminal styling
                 List {
                     if let error = loadError {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("ERROR: Failed to load workouts")
                                 .font(.appBody)
                             Text(error.localizedDescription)
-                                .font(.appCaption2)
+                                .font(.appBody)
                                 .foregroundStyle(.secondary)
                         }
-                        .padding(.vertical, 4)
                         .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                     }
 
                     if isLoading && workoutSessionList.isEmpty {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 6) {
                             ProgressView()
                                 .scaleEffect(0.8)
                             Text("Loading…")
@@ -204,13 +203,12 @@ private struct RootView: View {
                                     Text(workoutTitle(from: ws))
                                         .font(.appBody)
                                         .lineLimit(1)
-                                    Spacer()
+                                    Spacer(minLength: 0)
                                     Text(ws.date())
-                                        .font(.appCaption2)
+                                        .font(.appBody)
                                         .foregroundStyle(.secondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 2)
                             }
                             .buttonStyle(.plain)
                             .disabled(isPerformingSelection)
@@ -222,7 +220,7 @@ private struct RootView: View {
                                     deleteWorkout(ws)
                                 } label: {
                                     Text("DEL")
-                                        .font(.appCaption)
+                                        .font(.appBody)
                                 }
                                 .tint(.red.opacity(0.8))
                             }
@@ -240,6 +238,8 @@ private struct RootView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                .environment(\.defaultMinListRowHeight, 0)
+                .font(.appBody)
                 .refreshable {
                     // Avoid FFI in previews
                     if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" {

@@ -10,8 +10,9 @@ struct WorkoutPurposeSummaryView: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "sparkles")
+        HStack(spacing: 6) {
+            Text("✨")
+                .font(.appBody)
                 .foregroundStyle(.yellow)
             Text(summary)
                 .font(.appBody)
@@ -19,10 +20,9 @@ struct WorkoutPurposeSummaryView: View {
                 .truncationMode(.tail)
             Spacer(minLength: 0)
         }
+        .frame(minHeight: 19, maxHeight: 19)
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.vertical, 0)
         .onAppear { refreshSummary() }
         .onChange(of: workoutState.activeExerciseID) { _, _ in
             refreshSummary()

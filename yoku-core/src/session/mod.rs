@@ -129,6 +129,320 @@ impl Session {
         db::operations::update_workout_set(&self.db_pool, set_id, update).await
     }
 
+    async fn is_exercise_new_for_session(&self, exercise_id: i64) -> Result<bool> {
+        let workout_id = self.get_workout_id().await;
+        if let Some(workout_id) = workout_id {
+            let existing_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM workout_sets WHERE session_id = ?1 AND exercise_id = ?2",
+            )
+            .bind(workout_id)
+            .bind(exercise_id)
+            .fetch_one(&self.db_pool)
+            .await?;
+            Ok(existing_count == 0)
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub async fn add_set_from_parsed_with_modifications(
+        &self,
+        parsed: &ParsedSet,
+    ) -> Result<Vec<crate::uniffi_interface::modifications::Modification>> {
+        use crate::uniffi_interface::modifications::{Modification, ModificationType};
+
+        let session_id = self
+            .get_workout_id()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("No active workout in session"))?;
+
+        let request_str_content = if !parsed.original_string.is_empty() {
+            parsed.original_string.clone()
+        } else {
+            format!(
+                "{} {} reps rpe:{:?}",
+                parsed.exercise,
+                parsed.reps.unwrap_or(0),
+                parsed.rpe
+            )
+        };
+
+        let exercise_name = parsed.exercise.clone();
+        let exercise = get_or_create_exercise(&self.db_pool, &exercise_name).await?;
+        let is_new_exercise = self.is_exercise_new_for_session(exercise.id).await?;
+
+        let weight = parsed.weight.unwrap_or(0.0) as f64;
+        let reps = parsed.reps.unwrap_or(0) as i64;
+        let set_count = parsed.set_count.unwrap_or(1).max(1) as i64;
+        let parsed_rpe = parsed.rpe.map(|r| r as f64);
+
+        let request =
+            create_request_string_for_username(&self.db_pool, "cli", request_str_content.clone())
+                .await?;
+
+        let mut modifications = Vec::new();
+
+        if set_count > 1 {
+            let created_sets = add_multiple_sets_to_workout(
+                &self.db_pool,
+                &session_id,
+                &exercise.id,
+                &request.id,
+                &weight,
+                &reps,
+                parsed_rpe,
+                set_count,
+            )
+            .await?;
+
+            if is_new_exercise {
+                modifications.push(Modification {
+                    modification_type: ModificationType::ExerciseAdded,
+                    set_id: None,
+                    exercise_id: Some(exercise.id),
+                });
+            } else {
+                for set in created_sets {
+                    modifications.push(Modification {
+                        modification_type: ModificationType::SetAdded,
+                        set_id: Some(set.id),
+                        exercise_id: None,
+                    });
+                }
+            }
+        } else {
+            let created_set = add_workout_set(
+                &self.db_pool,
+                &session_id,
+                &exercise.id,
+                &request.id,
+                &weight,
+                &reps,
+                parsed_rpe,
+            )
+            .await?;
+
+            if is_new_exercise {
+                modifications.push(Modification {
+                    modification_type: ModificationType::ExerciseAdded,
+                    set_id: None,
+                    exercise_id: Some(exercise.id),
+                });
+            } else {
+                modifications.push(Modification {
+                    modification_type: ModificationType::SetAdded,
+                    set_id: Some(created_set.id),
+                    exercise_id: None,
+                });
+            }
+        }
+
+        Ok(modifications)
+    }
+
+    pub async fn update_workout_set_with_modifications(
+        &self,
+        set_id: i64,
+        update: &crate::db::models::UpdateWorkoutSet,
+    ) -> Result<(db::models::WorkoutSet, Vec<crate::uniffi_interface::modifications::Modification>)> {
+        use crate::uniffi_interface::modifications::{Modification, ModificationType};
+
+        let updated = db::operations::update_workout_set(&self.db_pool, set_id, update).await?;
+
+        let modifications = vec![Modification {
+            modification_type: ModificationType::SetModified,
+            set_id: Some(set_id),
+            exercise_id: None,
+        }];
+
+        Ok((updated, modifications))
+    }
+
+    pub async fn delete_set_with_modifications(
+        &self,
+        set_id: i64,
+    ) -> Result<Vec<crate::uniffi_interface::modifications::Modification>> {
+        use crate::uniffi_interface::modifications::{Modification, ModificationType};
+
+        delete_workout_set(&self.db_pool, set_id).await?;
+
+        Ok(vec![Modification {
+            modification_type: ModificationType::SetRemoved,
+            set_id: Some(set_id),
+            exercise_id: None,
+        }])
+    }
+
+    pub async fn classify_and_process_input_with_modifications(
+        &self,
+        input: &str,
+        selected_set_backend_id: Option<i64>,
+        visible_set_backend_ids: Vec<i64>,
+    ) -> Result<Vec<crate::uniffi_interface::modifications::Modification>> {
+        let workout_id = self.get_workout_id().await;
+        if workout_id.is_none() {
+            return Err(anyhow::anyhow!("No active workout session"));
+        }
+
+        let workout_context = self.build_workout_context_string().await?;
+
+        let known_exercises: Vec<String> = self
+            .get_all_exercises()
+            .await?
+            .into_iter()
+            .map(|exercise| exercise.name)
+            .collect();
+        let ctx = crate::llm::PromptContext {
+            known_exercises,
+            selected_set_backend_id,
+            visible_set_backend_ids,
+            ..Default::default()
+        };
+        let builder = crate::llm::PromptBuilder::new(ctx);
+
+        let commands = crate::llm::classify_commands(
+            self.llm_backend.as_ref(),
+            &builder,
+            input,
+            &workout_context,
+        )
+        .await?;
+
+        if commands.is_empty() {
+            warn!("LLM returned empty command array for input: {}", input);
+            return Ok(vec![]);
+        }
+
+        let sets = self.get_all_sets().await?;
+        let exercises = self.get_all_exercises().await?;
+        let exercise_map: std::collections::HashMap<i64, String> =
+            exercises.iter().map(|e| (e.id, e.name.clone())).collect();
+
+        let mut all_modifications = Vec::new();
+
+        for command in commands {
+            let mods = self
+                .execute_command_with_modifications(command, &sets, &exercise_map)
+                .await?;
+            all_modifications.extend(mods);
+        }
+
+        Ok(all_modifications)
+    }
+
+    async fn execute_command_with_modifications(
+        &self,
+        command: crate::llm::Command,
+        sets: &[crate::db::models::WorkoutSet],
+        exercise_map: &std::collections::HashMap<i64, String>,
+    ) -> Result<Vec<crate::uniffi_interface::modifications::Modification>> {
+        match command {
+            crate::llm::Command::AddSet {
+                exercise,
+                weight,
+                reps,
+                rpe,
+                set_count,
+                tags: _,
+                aoi: _,
+                original_string,
+            } => {
+                let parsed = ParsedSet {
+                    exercise,
+                    weight: weight.map(|w| w as f32),
+                    reps: reps.map(|r| r as i32),
+                    rpe: rpe.map(|r| r as f32),
+                    set_count: set_count.map(|c| c as i32),
+                    tags: vec![],
+                    aoi: None,
+                    original_string,
+                };
+                self.add_set_from_parsed_with_modifications(&parsed).await
+            }
+            crate::llm::Command::RemoveSet {
+                set_id,
+                description,
+            } => {
+                let resolved_id = if let Some(id) = set_id {
+                    Some(id)
+                } else if let Some(desc) = description {
+                    self.resolve_set_id_from_description(&desc, sets, exercise_map)
+                } else {
+                    None
+                };
+
+                if let Some(id) = resolved_id {
+                    self.delete_set_with_modifications(id).await
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Could not resolve set_id for remove_set command"
+                    ))
+                }
+            }
+            crate::llm::Command::EditSet {
+                set_id,
+                description,
+                exercise,
+                weight,
+                reps,
+                rpe,
+            } => {
+                let resolved_id = if let Some(id) = set_id {
+                    Some(id)
+                } else if let Some(desc) = description {
+                    self.resolve_set_id_from_description(&desc, sets, exercise_map)
+                } else {
+                    None
+                };
+
+                if let Some(id) = resolved_id {
+                    let exercise_id = if let Some(exercise_name) = exercise {
+                        let ex = get_or_create_exercise(&self.db_pool, &exercise_name).await?;
+                        Some(ex.id)
+                    } else {
+                        None
+                    };
+
+                    let update = crate::db::models::UpdateWorkoutSet {
+                        session_id: None,
+                        exercise_id,
+                        request_string_id: None,
+                        weight,
+                        reps,
+                        rpe,
+                        set_index: None,
+                        notes: None,
+                    };
+                    let (_, modifications) = self
+                        .update_workout_set_with_modifications(id, &update)
+                        .await?;
+                    Ok(modifications)
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Could not resolve set_id for edit_set command"
+                    ))
+                }
+            }
+            crate::llm::Command::ChangeIntention { .. } => {
+                Ok(vec![])
+            }
+            crate::llm::Command::Unknown { input } => {
+                warn!("Unknown command for input: {}", input);
+                let parsed = ParsedSet {
+                    exercise: input.clone(),
+                    weight: None,
+                    reps: None,
+                    rpe: None,
+                    set_count: Some(1),
+                    tags: vec![],
+                    aoi: None,
+                    original_string: input,
+                };
+                self.add_set_from_parsed_with_modifications(&parsed).await
+            }
+        }
+    }
+
     pub async fn get_all_exercises(&self) -> Result<Vec<Exercise>> {
         db::operations::get_all_exercises(&self.db_pool).await
     }

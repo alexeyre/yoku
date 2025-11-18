@@ -84,6 +84,18 @@ final class Session: ObservableObject {
     private var timerCancellable: AnyCancellable?
     private var exerciseIDMap: [Int64: UUID] = [:]
     private var setIDMap: [Int64: UUID] = [:]
+    private let glowSubject = PassthroughSubject<GlowEvent, Never>()
+    
+    var glowPublisher: AnyPublisher<GlowEvent, Never> {
+        glowSubject.eraseToAnyPublisher()
+    }
+    
+    func emitGlowEvent(target: GlowTarget, duration: TimeInterval = 2.5) {
+        let event = GlowEvent(target: target, duration: duration)
+        DispatchQueue.main.async {
+            self.glowSubject.send(event)
+        }
+    }
 
     init() {}
 
@@ -99,21 +111,30 @@ final class Session: ObservableObject {
     }
     
     func classifyAndProcessInput(input: String) async throws {
-        let snapshot = try await backend.classifyAndProcessInput(input)
+        // Collect currently selected set's backend ID
+        let selectedSetBackendID: Int64? = {
+            guard let activeSetID = activeSetID else { return nil }
+            // Find the set with this UUID and get its backend ID
+            for exercise in exercises {
+                if let set = exercise.sets.first(where: { $0.id == activeSetID }) {
+                    return set.backendID
+                }
+            }
+            return nil
+        }()
+        
+        // Collect all visible sets' backend IDs (sets in expanded exercises)
+        let visibleSetBackendIDs: [Int64] = exercises
+            .filter { expanded.contains($0.id) }
+            .flatMap { $0.sets }
+            .compactMap { $0.backendID }
+        
+        let snapshot = try await backend.classifyAndProcessInput(
+            input,
+            selectedSetBackendID: selectedSetBackendID,
+            visibleSetBackendIDs: visibleSetBackendIDs
+        )
         apply(snapshot: snapshot)
-    }
-
-    func addSetFromString(input: String) async throws {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        do {
-            let snapshot = try await backend.addSetFromString(trimmed)
-            apply(snapshot: snapshot)
-            lastError = nil
-        } catch {
-            lastError = error
-            throw mapCoordinatorError(error)
-        }
     }
 
     func setActiveWorkoutSessionId(_ id: Int64) async throws {
@@ -197,7 +218,7 @@ final class Session: ObservableObject {
     func updateWorkoutSet(id: Int64, weight: Double, reps: Int64) async throws {
         do {
             let snapshot = try await backend.updateWorkoutSet(id: id, weight: weight, reps: reps)
-            apply(snapshot: snapshot)
+            apply(snapshot: snapshot, emitGlowEvents: false)
             lastError = nil
         } catch {
             lastError = error
@@ -288,11 +309,36 @@ final class Session: ObservableObject {
 
     // MARK: - Internal helpers
 
-    private func apply(snapshot: BackendSessionCoordinator.Snapshot) {
+    private func apply(snapshot: BackendSessionCoordinator.Snapshot, emitGlowEvents: Bool = true) {
         session = snapshot.session
         activeWorkoutSession = snapshot.workout
         liftsByExerciseId = snapshot.liftsByExerciseId
         updateExercises(with: snapshot.exercises, sets: snapshot.sets)
+        
+        if emitGlowEvents {
+            for mod in snapshot.modifications {
+                let target: GlowTarget
+                switch mod.modificationType {
+                case .setAdded:
+                    if let setId = mod.setId {
+                        target = .set(id: setId)
+                        emitGlowEvent(target: target)
+                    }
+                case .exerciseAdded:
+                    if let exId = mod.exerciseId {
+                        target = .exercise(id: exId)
+                        emitGlowEvent(target: target)
+                    }
+                case .setModified:
+                    if let setId = mod.setId {
+                        target = .set(id: setId)
+                        emitGlowEvent(target: target)
+                    }
+                case .setRemoved:
+                    break
+                }
+            }
+        }
     }
 
     private func updateExercises(
@@ -322,11 +368,13 @@ final class Session: ObservableObject {
             let exerciseUUID = exerciseIDMap[backendID] ?? UUID()
             nextExerciseMap[backendID] = exerciseUUID
 
-            let setModels = sets.map { backendSet -> ExerciseSetModel in
+            // Sets are already sorted by set_index from the backend, so we can use enumerated()
+            // to number them sequentially within each exercise (1, 2, 3, etc.)
+            let setModels = sets.enumerated().map { (index, backendSet) -> ExerciseSetModel in
                 let backendSetID = backendSet.id()
                 let setUUID = setIDMap[backendSetID] ?? UUID()
                 nextSetMap[backendSetID] = setUUID
-                let label = "Set \(backendSet.id())"
+                let label = "Set \(index + 1)" // Use 1-based index within the exercise
                 let weight = backendSet.weight()
                 let reps = backendSet.reps()
                 let rpe = backendSet.rpe()
@@ -439,6 +487,18 @@ private actor BackendSessionCoordinator {
         let exercises: [YokuUniffi.Exercise]
         let sets: [YokuUniffi.WorkoutSet]
         let liftsByExerciseId: [Int64: [Double]]
+        let modifications: [YokuUniffi.Modification]
+        
+        func withModifications(_ mods: [YokuUniffi.Modification]) -> Snapshot {
+            Snapshot(
+                session: session,
+                workout: workout,
+                exercises: exercises,
+                sets: sets,
+                liftsByExerciseId: liftsByExerciseId,
+                modifications: mods
+            )
+        }
     }
 
     enum CoordinatorError: LocalizedError {
@@ -475,17 +535,21 @@ private actor BackendSessionCoordinator {
         guard let session else { throw CoordinatorError.missingSession }
         return try await snapshot(for: session)
     }
-
-    func addSetFromString(_ request: String) async throws -> Snapshot {
-        let session = try requireSession()
-        try await YokuUniffi.addSetFromString(session: session, requestString: request)
-        return try await snapshot(for: session)
-    }
     
-    func classifyAndProcessInput(_ input: String) async throws -> Snapshot {
+    func classifyAndProcessInput(
+        _ input: String,
+        selectedSetBackendID: Int64?,
+        visibleSetBackendIDs: [Int64]
+    ) async throws -> Snapshot {
         let session = try requireSession()
-        try await YokuUniffi.classifyAndProcessInput(session: session, input: input)
-        return try await snapshot(for: session)
+        let modifications = try await YokuUniffi.classifyAndProcessInput(
+            session: session,
+            input: input,
+            selectedSetBackendId: selectedSetBackendID,
+            visibleSetBackendIds: visibleSetBackendIDs
+        )
+        let snapshot = try await snapshot(for: session)
+        return snapshot.withModifications(modifications)
     }
 
     func setActiveWorkoutSessionId(_ id: Int64) async throws -> Snapshot {
@@ -525,14 +589,16 @@ private actor BackendSessionCoordinator {
     
     func deleteWorkoutSet(_ id: Int64) async throws -> Snapshot {
         let session = try requireSession()
-        try await YokuUniffi.deleteWorkoutSet(session: session, id: id)
-        return try await snapshot(for: session)
+        let modifications = try await YokuUniffi.deleteWorkoutSet(session: session, id: id)
+        let snapshot = try await snapshot(for: session)
+        return snapshot.withModifications(modifications)
     }
     
     func updateWorkoutSet(id: Int64, weight: Double, reps: Int64) async throws -> Snapshot {
         let session = try requireSession()
-        _ = try await YokuUniffi.updateWorkoutSet(session: session, setId: id, reps: reps, weight: weight)
-        return try await snapshot(for: session)
+        let result = try await YokuUniffi.updateWorkoutSet(session: session, setId: id, reps: reps, weight: weight)
+        let snapshot = try await snapshot(for: session)
+        return snapshot.withModifications(result.modifications)
     }
 
     private func snapshot(for session: YokuUniffi.Session) async throws -> Snapshot {
@@ -572,7 +638,8 @@ private actor BackendSessionCoordinator {
             workout: workout,
             exercises: exercises,
             sets: sets,
-            liftsByExerciseId: liftsByExerciseId
+            liftsByExerciseId: liftsByExerciseId,
+            modifications: []
         )
     }
 

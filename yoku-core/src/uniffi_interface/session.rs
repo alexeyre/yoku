@@ -2,6 +2,7 @@ use crate::db;
 use crate::db::models::UpdateWorkoutSet;
 use crate::session::Session;
 use crate::uniffi_interface::errors::YokuError;
+use crate::uniffi_interface::modifications::{Modification, UpdateWorkoutSetResult};
 use crate::uniffi_interface::objects::{Exercise, WorkoutSession, WorkoutSet, WorkoutSuggestion};
 use log::*;
 use std::sync::Arc;
@@ -29,16 +30,31 @@ pub async fn reset_database(session: &Session) -> std::result::Result<(), YokuEr
     Ok(())
 }
 
-#[uniffi::export]
-pub async fn add_set_from_string(
-    session: &Session,
-    request_string: &str,
-) -> std::result::Result<(), YokuError> {
-    debug!("Adding set from string: {}", request_string);
-    let rt = crate::runtime::init_global_runtime_blocking();
-    rt.block_on(session.add_set_from_string(request_string))?;
-    Ok(())
-}
+// #[uniffi::export]
+// pub async fn add_set_from_string(
+//     session: &Session,
+//     request_string: &str,
+// ) -> std::result::Result<Vec<Modification>, YokuError> {
+//     debug!("Adding set from string: {}", request_string);
+//     let rt = crate::runtime::init_global_runtime_blocking();
+//     let trimmed = request_string.trim();
+//     if trimmed.is_empty() {
+//         return Ok(vec![]);
+//     }
+//     let parsed = crate::llm::ParsedSet {
+//         exercise: trimmed.to_string(),
+//         weight: None,
+//         reps: None,
+//         rpe: None,
+//         set_count: Some(1),
+//         tags: vec![],
+//         aoi: None,
+//         original_string: trimmed.to_string(),
+//     };
+//     let modifications = rt
+//         .block_on(session.add_set_from_parsed_with_modifications(&parsed))?;
+//     Ok(modifications)
+// }
 
 #[derive(uniffi::Object)]
 pub struct LiftDataPoint {
@@ -93,10 +109,13 @@ pub async fn delete_workout_session(session: &Session, id: i64) -> Result<(), Yo
 }
 
 #[uniffi::export]
-pub async fn delete_workout_set(session: &Session, id: i64) -> Result<(), YokuError> {
+pub async fn delete_workout_set(
+    session: &Session,
+    id: i64,
+) -> std::result::Result<Vec<Modification>, YokuError> {
     let rt = crate::runtime::init_global_runtime_blocking();
-    rt.block_on(session.delete_set(id))?;
-    Ok(())
+    let modifications = rt.block_on(session.delete_set_with_modifications(id))?;
+    Ok(modifications)
 }
 
 #[uniffi::export]
@@ -179,16 +198,20 @@ pub async fn update_workout_set(
     set_id: i64,
     reps: Option<i64>,
     weight: Option<f64>,
-) -> std::result::Result<WorkoutSet, YokuError> {
+) -> std::result::Result<UpdateWorkoutSetResult, YokuError> {
     let rt = crate::runtime::init_global_runtime_blocking();
     let update = UpdateWorkoutSet {
         reps,
         weight,
         ..Default::default()
     };
-    let workout_db = rt.block_on(session.update_workout_set(set_id, &update))?;
+    let (workout_db, modifications) =
+        rt.block_on(session.update_workout_set_with_modifications(set_id, &update))?;
     let workout_uniffi: WorkoutSet = workout_db.into();
-    Ok(workout_uniffi)
+    Ok(UpdateWorkoutSetResult {
+        set: Arc::new(workout_uniffi),
+        modifications,
+    })
 }
 
 #[uniffi::export]
@@ -228,8 +251,14 @@ pub async fn get_workout_suggestions(
 pub async fn classify_and_process_input(
     session: &Session,
     input: &str,
-) -> std::result::Result<(), YokuError> {
+    selected_set_backend_id: Option<i64>,
+    visible_set_backend_ids: Vec<i64>,
+) -> std::result::Result<Vec<Modification>, YokuError> {
     let rt = crate::runtime::init_global_runtime_blocking();
-    rt.block_on(session.classify_and_process_input(input))?;
-    Ok(())
+    let modifications = rt.block_on(session.classify_and_process_input_with_modifications(
+        input,
+        selected_set_backend_id,
+        visible_set_backend_ids,
+    ))?;
+    Ok(modifications)
 }

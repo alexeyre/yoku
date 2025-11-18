@@ -31,9 +31,9 @@ extension Font {
     
     // MARK: - App Font Styles
     
-    /// Standard body text (footnote size)
+    /// Standard body text (terminal-style)
     static var appBody: Font {
-        customFont(size: 13)
+        customFont(size: 14)
     }
     
     /// Caption text (smaller)
@@ -58,7 +58,7 @@ extension Font {
     
     /// Button text
     static var appButton: Font {
-        customFont(size: 13)
+        customFont(size: 14)
     }
 }
 

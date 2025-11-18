@@ -362,6 +362,8 @@ pub struct PromptContext {
     pub exercise_examples: Vec<ExerciseToEqMusExample>,
     pub max_examples: usize,
     pub max_example_chars: usize,
+    pub selected_set_backend_id: Option<i64>,
+    pub visible_set_backend_ids: Vec<i64>,
 }
 
 impl Default for PromptContext {
@@ -375,6 +377,8 @@ impl Default for PromptContext {
             exercise_examples: vec![],
             max_examples: 3,
             max_example_chars: 1500,
+            selected_set_backend_id: None,
+            visible_set_backend_ids: vec![],
         }
     }
 }
@@ -551,11 +555,14 @@ Command types:
    - If set_id is provided, use it directly
    - If description is provided (e.g., "last bench press set"), the backend will resolve it
    - If user says "remove the last 2 sets", return 2 remove_set commands
+   - If user says "this set" and a currently selected set ID is provided in context, use that set_id
+   - If user says "all the sets I can see" or similar and visible set IDs are provided, use those set_ids (one command per set)
 
 3. "edit_set" - Edit an existing set. Fields: set_id (integer|null), description (string|null), exercise (string|null), weight (number|null), reps (integer|null), rpe (number|null)
    - Only include fields that should be changed
    - If user says "change last bench press to 105kg", include set_id or description pointing to the last bench press set, and weight=105.0
    - If user says "no that should be 80kg" referring to most recent set, use description or set_id from recent sets
+   - If user says "this set" and a currently selected set ID is provided in context, use that set_id
 
 4. "change_intention" - Change workout intention/goal. Fields: intention (string)
    - Extract the intention from natural language
@@ -572,10 +579,32 @@ Return only valid JSON: {"commands": [...]}"#.to_string()
     }
 
     pub fn user_input_classification_prompt(&self, input: &str, workout_context: &str) -> String {
-        format!(
-            "User input: \"{}\"\n\nWorkout Context:\n{}\n\nAnalyze the input and return a JSON array of commands to execute. All fields should be fully parsed.",
-            input, workout_context
-        )
+        let mut context_parts = vec![format!("User input: \"{}\"", input)];
+        
+        // Add set context information
+        if let Some(selected_id) = self.ctx.selected_set_backend_id {
+            context_parts.push(format!(
+                "Currently selected set ID: {} (when user says 'this set', they mean set ID {})",
+                selected_id, selected_id
+            ));
+        }
+        
+        if !self.ctx.visible_set_backend_ids.is_empty() {
+            let visible_ids_str = self.ctx.visible_set_backend_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            context_parts.push(format!(
+                "Visible set IDs: [{}] (when user says 'all the sets I can see' or similar, they mean these set IDs)",
+                visible_ids_str
+            ));
+        }
+        
+        context_parts.push(format!("Workout Context:\n{}", workout_context));
+        context_parts.push("Analyze the input and return a JSON array of commands to execute. All fields should be fully parsed.".to_string());
+        
+        context_parts.join("\n\n")
     }
 
     pub fn system_suggestion_prompt(&self) -> String {

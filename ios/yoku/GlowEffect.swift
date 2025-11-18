@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 // Local glow effect for individual elements
 struct LocalGlowEffect: ViewModifier {
@@ -77,6 +78,65 @@ extension View {
     }
 }
 
+struct GlowEventModifier: ViewModifier {
+    let target: GlowTarget
+    @EnvironmentObject var session: Session
+    @State private var isActive = false
+    @State private var cancellable: AnyCancellable?
+    
+    func body(content: Content) -> some View {
+        content
+            .localGlowEffect(isActive: $isActive)
+            .onAppear {
+                subscribe()
+            }
+            .onDisappear {
+                cancellable?.cancel()
+                cancellable = nil
+            }
+    }
+    
+    private func subscribe() {
+        cancellable?.cancel()
+        let targetMatch = self.target
+        cancellable = session.glowPublisher
+            .receive(on: DispatchQueue.main)
+            .filter { $0.matches(targetMatch) }
+            .sink { event in
+                isActive = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + event.duration) {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        isActive = false
+                    }
+                }
+            }
+    }
+}
+
+extension View {
+    func glowOnEvent(target: GlowTarget) -> some View {
+        modifier(GlowEventModifier(target: target))
+    }
+    
+    func glowOnSetEvent(setID: Int64?) -> some View {
+        if let id = setID {
+            return AnyView(self.glowOnEvent(target: .set(id: id)))
+        }
+        return AnyView(self)
+    }
+    
+    func glowOnExerciseEvent(exerciseID: Int64?) -> some View {
+        if let id = exerciseID {
+            return AnyView(self.glowOnEvent(target: .exercise(id: id)))
+        }
+        return AnyView(self)
+    }
+    
+    func glowOnCustomEvent(identifier: String) -> some View {
+        glowOnEvent(target: .custom(identifier))
+    }
+}
+
 // Original full-screen glow effect (kept for compatibility)
 struct GlowEffect: View {
     @State private var gradientStops: [Gradient.Stop] = GlowEffect.generateGradientStops()
@@ -141,21 +201,21 @@ struct Effect: View {
     var blur: CGFloat
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 55)
-                .strokeBorder(
-                    AngularGradient(
-                        gradient: Gradient(stops: gradientStops),
-                        center: .center
-                    ),
-                    lineWidth: width
-                )
-                .frame(
-                    width: UIScreen.main.bounds.width,
-                    height: UIScreen.main.bounds.height
-                )
-                .padding(.top, -17)
-                .blur(radius: blur)
+        GeometryReader { proxy in
+            ZStack {
+                RoundedRectangle(cornerRadius: 55)
+                    .strokeBorder(
+                        AngularGradient(
+                            gradient: Gradient(stops: gradientStops),
+                            center: .center
+                        ),
+                        lineWidth: width
+                    )
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .padding(.top, -17)
+                    .blur(radius: blur)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
     }
 }
@@ -165,20 +225,20 @@ struct EffectNoBlur: View {
     var width: CGFloat
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 55)
-                .strokeBorder(
-                    AngularGradient(
-                        gradient: Gradient(stops: gradientStops),
-                        center: .center
-                    ),
-                    lineWidth: width
-                )
-                .frame(
-                    width: UIScreen.main.bounds.width,
-                    height: UIScreen.main.bounds.height
-                )
-                .padding(.top, -26)
+        GeometryReader { proxy in
+            ZStack {
+                RoundedRectangle(cornerRadius: 55)
+                    .strokeBorder(
+                        AngularGradient(
+                            gradient: Gradient(stops: gradientStops),
+                            center: .center
+                        ),
+                        lineWidth: width
+                    )
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .padding(.top, -26)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
     }
 }

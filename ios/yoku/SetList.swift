@@ -17,7 +17,7 @@ struct SetList: View {
     // Track previous set counts per exercise to detect new sets
     @State private var previousSetCounts: [UUID: Int] = [:]
 
-    // Chart layout constants
+    
     private let chartHeight: CGFloat = 132
     private let chartHorizontalPadding: CGFloat = 12
     private let chartVerticalPadding: CGFloat = 6
@@ -25,43 +25,22 @@ struct SetList: View {
 
     var body: some View {
         let activeExercise = workoutState.activeExercise
-        let activeSetIndex = workoutState.indexOfActiveSet(in: activeExercise)
-
-        List {
-            ExerciseListView(
-                seenSetIDs: $seenSetIDs,
-                previousSetCounts: $previousSetCounts
-            )
-
-            // Chart row below the set list
-            Section {
-                VStack(spacing: 0) {
-                    Divider().opacity(0.15)
-                    SetChartView(
-                        exerciseName: activeExercise?.name,
-                        dataPoints: workoutState.dataSeries(for: activeExercise),
-                        activeSetIndex: activeSetIndex
+        GeometryReader { geometry in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ExerciseListView(
+                        seenSetIDs: $seenSetIDs,
+                        previousSetCounts: $previousSetCounts,
+                        availableWidth: geometry.size.width
                     )
-                    .padding(.horizontal, chartHorizontalPadding)
-                    .padding(.vertical, chartVerticalPadding)
-                    .frame(height: chartHeight)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                    
+                    CommandInputBar()
+                        .environmentObject(workoutState)
+                        .padding(.top, 4)
                 }
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-            }
-
-            // Suggestions section
-            Section {
-                ExerciseSuggestionsView()
-                    .environmentObject(workoutState)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6))
-                    .listRowBackground(Color.clear)
+                .font(.appBody)
             }
         }
-        .listStyle(.plain)
-        .environment(\.defaultMinListRowHeight, 12)
-        .scrollContentBackground(.hidden)
         .onAppear {
             workoutState.initializeActiveSelectionIfNeeded()
             // Initialize seen set IDs with current sets
@@ -89,13 +68,15 @@ struct SetList: View {
         @EnvironmentObject var workoutState: Session
         @Binding var seenSetIDs: Set<UUID>
         @Binding var previousSetCounts: [UUID: Int]
+        let availableWidth: CGFloat
         
         var body: some View {
             ForEach(workoutState.exercises) { exercise in
                 // Exercise row (tappable)
                 ExerciseRowView(
                     exercise: exercise,
-                    previousSetCount: previousSetCounts[exercise.id]
+                    previousSetCount: previousSetCounts[exercise.id],
+                    availableWidth: availableWidth
                 )
                 .onAppear {
                     // Initialize if not set
@@ -116,31 +97,31 @@ struct SetList: View {
                             workoutState.setActiveExercise(exercise)
                             workoutState.activeSetID = set.id
                         } label: {
-                            SetInformationView(set: set)
+                            SetInformationView(set: set, availableWidth: availableWidth)
                         }
                         .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 6))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 24)
+                        .padding(.trailing, 12)
+                        .background(
                             set.id == workoutState.activeSetID
                             ? Color.accentColor.opacity(0.06)
                             : Color.clear
                         )
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                if let backendID = set.backendID {
-                                    Task {
-                                        try? await workoutState.deleteSet(id: backendID)
+                        .glowOnSetEvent(setID: set.backendID)
+                        .gesture(
+                            DragGesture(minimumDistance: 50)
+                                .onEnded { value in
+                                    if value.translation.width < -100 {
+                                        if let backendID = set.backendID {
+                                            Task {
+                                                try? await workoutState.deleteSet(id: backendID)
+                                            }
+                                        }
                                     }
                                 }
-                            } label: {
-                                Text("DEL")
-                                    .font(.appCaption)
-                            }
-                            .tint(.red.opacity(0.8))
-                        }
+                        )
                         .onAppear {
-                            let wasNew = !seenSetIDs.contains(set.id)
                             seenSetIDs.insert(set.id)
                         }
                     }
@@ -156,8 +137,7 @@ struct SetList: View {
         @EnvironmentObject var workoutState: Session
         var exercise: ExerciseModel
         var previousSetCount: Int?
-        @State private var showGlow: Bool = false
-        @State private var lastSetCount: Int = 0
+        let availableWidth: CGFloat
         
         var body: some View {
             Button {
@@ -165,8 +145,8 @@ struct SetList: View {
                 workoutState.toggle(expansionFor: exercise, expandIfCollapsed: true)
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: workoutState.isExpanded(exercise) ? "chevron.down" : "chevron.right")
-                        .font(.appIcon)
+                    Text(workoutState.isExpanded(exercise) ? "▼" : "▶")
+                        .font(.appBody)
                         .foregroundStyle(.secondary)
 
                     Text(exercise.name)
@@ -174,42 +154,27 @@ struct SetList: View {
                         .lineLimit(1)
 
                     if exercise.id == workoutState.activeExerciseID {
-                        Spacer(minLength: 4)
+                        Spacer(minLength: 0)
                         Text("ACTIVE")
-                            .font(.appCaption2)
+                            .font(.appBody)
                             .foregroundStyle(.tint)
                             .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
                             .background(Color.accentColor.opacity(0.12))
                             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 2) // very tight
-                .padding(.horizontal, 4)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .listRowInsets(EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6))
-            .listRowSeparator(.hidden)
-            .listRowBackground(
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.horizontal, 12)
+            .background(
                 exercise.id == workoutState.activeExerciseID
                 ? Color.accentColor.opacity(0.06)
                 : Color.clear
             )
-            .localGlowEffect(isActive: $showGlow)
-            .onAppear {
-                lastSetCount = exercise.sets.count
-            }
-            .onChange(of: exercise.sets.count) { oldValue, newValue in
-                // Trigger glow if set count increased (new sets added)
-                if newValue > oldValue {
-                    withAnimation(.easeIn(duration: 0.2)) {
-                        showGlow = true
-                    }
-                }
-                lastSetCount = newValue
-            }
+            .glowOnExerciseEvent(exerciseID: exercise.backendID)
         }
     }
 
@@ -234,36 +199,35 @@ struct SetList: View {
     private struct SetInformationView: View {
         @EnvironmentObject var workoutState: Session
         var set: ExerciseSetModel
+        let availableWidth: CGFloat
         @State var weightText: String
         @State var repsText: String
-        @State private var showWeightGlow: Bool = false
-        @State private var showRepsGlow: Bool = false
-        @State private var previousWeight: Double
-        @State private var previousReps: Int64
-        @State private var isUserEditing: Bool = false  // Track if user is actively editing
 
-        // Fixed widths for alignment across all sets
-        private let weightFieldWidth: CGFloat = 50  // Enough for "999.9"
-        private let repsFieldWidth: CGFloat = 35    // Enough for "999"
-
-        init(set: ExerciseSetModel) {
+        init(set: ExerciseSetModel, availableWidth: CGFloat) {
             self.set = set
+            self.availableWidth = availableWidth
             self.weightText = String(format: "%.1f", set.weight)
             self.repsText = String(format: "%lld", set.reps)
-            self._previousWeight = State(initialValue: set.weight)
-            self._previousReps = State(initialValue: set.reps)
         }
         
-        // Update state when set changes (e.g., after backend update)
+        private var setLabelWidth: CGFloat {
+            50
+        }
+        
+        private var weightFieldWidth: CGFloat {
+            60
+        }
+        
+        private var repsFieldWidth: CGFloat {
+            35
+        }
+        
         private func syncStateFromSet() {
             weightText = String(format: "%.1f", set.weight)
             repsText = String(format: "%lld", set.reps)
         }
 
         func propagateUpdates() async {
-            // Mark that this is a user-initiated update
-            isUserEditing = true
-            
             var setWeight = set.weight
             var setReps = set.reps
             if let newSetWeight = Double(weightText) {
@@ -275,60 +239,53 @@ struct SetList: View {
             do {
                 try await workoutState.updateWorkoutSet(id: self.set.backendID!, weight: setWeight, reps: setReps)
             } catch {
-                // TODO
             }
             weightText = String(format: "%.1f", setWeight)
             repsText = String(format: "%lld", setReps)
-            
-            // Update previous values to match what we just set
-            previousWeight = setWeight
-            previousReps = setReps
-            
-            // Reset the flag after a short delay to allow backend update to complete
-            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
-            isUserEditing = false
         }
 
         var body: some View {
-            HStack(spacing: 6) {
-                Rectangle()
-                    .frame(width: 2)
-                    .opacity(0.25)
-                    .accessibilityHidden(true)
-
+            HStack(spacing: 0) {
                 Text(set.label)
                     .font(.appBody)
                     .lineLimit(1)
-                    .frame(width: 50, alignment: .leading)  // Fixed width for "Set X"
-
-                TextField("Set weight", text: $weightText)
-                    .onSubmit {
-                        Task { await propagateUpdates() }
-                    }
-                    .font(.appBody)
-                    .frame(width: weightFieldWidth, alignment: .trailing)  // Right-align numbers
-                    .multilineTextAlignment(.trailing)
-                    .textFieldStyle(.plain)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .localGlowEffect(isActive: $showWeightGlow)
-
-                Text(String("x"))
-                    .font(.appBody)
-                    .lineLimit(1)
+                    .frame(width: setLabelWidth, alignment: .leading)
                 
-                TextField("reps", text: $repsText)
-                    .onSubmit {
-                        Task { await propagateUpdates() }
-                    }
-                    .font(.appBody)
-                    .frame(width: repsFieldWidth, alignment: .trailing)  // Right-align numbers
-                    .multilineTextAlignment(.trailing)
-                    .lineLimit(1)
-                    .textFieldStyle(.plain)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .localGlowEffect(isActive: $showRepsGlow)
+                HStack(spacing: 0) {
+                    
+                    TextField("Set weight", text: $weightText)
+                        .onSubmit {
+                            Task { await propagateUpdates() }
+                        }
+                        .font(.appBody)
+                        .frame(width: weightFieldWidth, alignment: .trailing)
+                        .multilineTextAlignment(.trailing)
+                        .textFieldStyle(.plain)
+                        .padding(0)
+                    
+                    Text("kg")
+                        .font(.appBody)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, alignment: .leading)
+                        .padding(0)
+                }
+                HStack(spacing: 0) {
+                    TextField("reps", text: $repsText)
+                        .onSubmit {
+                            Task { await propagateUpdates() }
+                        }
+                        .font(.appBody)
+                        .frame(width: repsFieldWidth, alignment: .leading)
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(1)
+                        .textFieldStyle(.plain)
+                        .padding(0)
+                    Text("reps")
+                        .font(.appBody)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 35, alignment: .leading)
+                        .padding(0)
+                }
 
                 if let rpe = set.rpe {
                     Text(String(format: "@%.1f", rpe))
@@ -338,44 +295,24 @@ struct SetList: View {
                 }
                 
                 if set.id == workoutState.activeSetID {
-                    Spacer(minLength: 4)
-                    Image(systemName: "largecircle.fill.circle")
-                        .font(.appIcon)
+                    Spacer(minLength: 0)
+                    Text("●")
+                        .font(.appBody)
                         .foregroundStyle(.tint)
                         .accessibilityLabel("Active set")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 1)
             .contentShape(Rectangle())
             .onChange(of: set.weight) { oldValue, newValue in
-                // Sync state when set is updated from backend
                 if abs(Double(weightText) ?? 0 - newValue) > 0.01 {
                     syncStateFromSet()
-                    // Only trigger glow if this is NOT a user-initiated edit
-                    // and the value actually changed from what we last saw
-                    if !isUserEditing && abs(newValue - previousWeight) > 0.01 {
-                        withAnimation(.easeIn(duration: 0.2)) {
-                            showWeightGlow = true
-                        }
-                    }
-                    previousWeight = newValue
                 }
             }
             .onChange(of: set.reps) { oldValue, newValue in
-                // Sync state when set is updated from backend
                 if let textValue = Int64(repsText), textValue != newValue {
                     syncStateFromSet()
-                    // Only trigger glow if this is NOT a user-initiated edit
-                    // and the value actually changed from what we last saw
-                    if !isUserEditing && newValue != previousReps {
-                        withAnimation(.easeIn(duration: 0.2)) {
-                            showRepsGlow = true
-                        }
-                    }
-                    previousReps = newValue
                 } else if Int64(repsText) == nil {
-                    // Text doesn't parse to Int64, sync from set
                     syncStateFromSet()
                 }
             }
