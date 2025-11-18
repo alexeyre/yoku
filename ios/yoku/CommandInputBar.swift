@@ -31,8 +31,14 @@ struct CommandInputBar: View {
         let cmd = inputText
 
         Task {
-            // Use the backend to classify and process the input intelligently
-            _ = try? await session.classifyAndProcessInput(input: cmd)
+            // Use the command-style interface to process user input
+            // The LLM analyzes the input with full workout context and returns commands to execute
+            do {
+                try await session.classifyAndProcessInput(input: cmd)
+            } catch {
+                // Error is stored in session.lastError and can be displayed to user
+                print("Error processing command: \(error)")
+            }
             await MainActor.run {
                 inputText = ""
                 isProcessing = false

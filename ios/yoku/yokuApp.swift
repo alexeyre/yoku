@@ -68,7 +68,7 @@ struct yokuApp: App {
                     let dbPath = dbURL.path
                     lastDBPath = dbPath
 
-                    try await session.setup(dbPath: dbPath, model: "gpt-5-mini", fastModel: "gpt-5-nano")
+                    try await session.setup(dbPath: dbPath, model: "gpt-5-mini")
                     isDatabaseReady = true
                 } catch {
                     setupError = error
@@ -331,7 +331,7 @@ private struct RootView: View {
                 guard index < workoutSessionList.count else { continue }
                 let workout = workoutSessionList[index]
                 do {
-                    _ = try await session.deleteWorkout(id: workout.id())
+                    _ = try await session.deleteWorkoutSession(id: workout.id())
                 } catch {
                     loadError = error
                 }
@@ -346,7 +346,7 @@ private struct RootView: View {
     private func deleteWorkout(_ workout: YokuUniffi.WorkoutSession) {
         Task {
             do {
-                _ = try await session.deleteWorkout(id: workout.id())
+                _ = try await session.deleteWorkoutSession(id: workout.id())
                 await loadWorkouts()
             } catch {
                 loadError = error

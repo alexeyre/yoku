@@ -10,8 +10,8 @@ use yoku_core::db::operations::{
 };
 use yoku_core::graph::GraphManager;
 use yoku_core::llm::{
-    LlmInterface, ParsedSet, PromptBuilder, PromptContext,
-    generate_exercise_to_equipment_and_muscles,
+    generate_exercise_to_equipment_and_muscles, LlmInterface, ParsedSet, PromptBuilder,
+    PromptContext,
 };
 use yoku_core::session::Session;
 
@@ -38,21 +38,21 @@ enum Commands {
     },
 
     Delete {
-        id: i32,
+        id: i64,
     },
 
     ListSets {
-        session_id: i32,
+        session_id: i64,
     },
 
     AddSet {
-        session_id: i32,
+        session_id: i64,
         #[arg(value_parser)]
         input: String,
     },
 
     DeleteSet {
-        set_id: i32,
+        set_id: i64,
     },
 
     SuggestExerciseLinks {
@@ -155,14 +155,14 @@ async fn cmd_create(name: Option<String>) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_delete(id: &i32) -> Result<()> {
+async fn cmd_delete(id: &i64) -> Result<()> {
     // Parse the provided UUID string and pass its 16-byte representation to the DB layer.
     let deleted = delete_workout_session(*id).await?;
     println!("Deleted {} rows for session {}", deleted, id);
     Ok(())
 }
 
-async fn cmd_list_sets(session_id: &i32) -> Result<()> {
+async fn cmd_list_sets(session_id: &i64) -> Result<()> {
     // Parse into a Uuid then convert to 16-byte Vec<u8> for DB calls
     let sets = get_sets_for_session(*session_id).await?;
     if sets.is_empty() {
@@ -178,7 +178,7 @@ async fn cmd_list_sets(session_id: &i32) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_add_set(session_id: &i32, input: &str, parser: LlmInterface) -> Result<()> {
+async fn cmd_add_set(session_id: &i64, input: &str, parser: LlmInterface) -> Result<()> {
     let sess = Session::new_blank().await;
     sess.set_workout_id(*session_id).await?;
 
@@ -203,7 +203,7 @@ async fn cmd_add_set(session_id: &i32, input: &str, parser: LlmInterface) -> Res
     Ok(())
 }
 
-async fn cmd_delete_set(set_id: &i32) -> Result<()> {
+async fn cmd_delete_set(set_id: &i64) -> Result<()> {
     let deleted = delete_workout_set(*set_id).await?;
     println!("Deleted {} rows for set {}", deleted, set_id);
     Ok(())

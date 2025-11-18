@@ -30,8 +30,8 @@
     {
       packages = forAllSystems (
         system: pkgs: {
-          yoku-cli = pkgs.rustPlatform.buildRustPackage {
-            pname = "yoku-cli";
+          yoku-core = pkgs.rustPlatform.buildRustPackage {
+            pname = "yoku-core";
             version = "0.1.0";
 
             src = ./.;
@@ -52,13 +52,13 @@
             ];
 
             meta = with pkgs.lib; {
-              description = "Yoku workout tracker CLI";
+              description = "Yoku workout tracker";
               license = licenses.mit;
               platforms = supportedSystems;
             };
           };
 
-          default = self.packages.${system}.yoku-cli;
+          default = self.packages.${system}.yoku-core;
         }
       );
 

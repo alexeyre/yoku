@@ -93,3 +93,16 @@ CREATE INDEX IF NOT EXISTS idx_workout_sets_exercise_id ON workout_sets (exercis
 -- Keep unique indexes declared explicitly where helpful (some already created via UNIQUE constraints)
 CREATE UNIQUE INDEX IF NOT EXISTS ux_exercises_slug ON exercises (slug);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_users_username ON users (username);
+
+-- Workout suggestion cache
+CREATE TABLE IF NOT EXISTS workout_suggestion_cache (
+    session_id INTEGER NOT NULL REFERENCES workout_sessions(id) ON DELETE CASCADE,
+    cache_key TEXT NOT NULL,
+    suggestions_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (session_id, cache_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workout_suggestion_cache_session_id ON workout_suggestion_cache (session_id);
+CREATE INDEX IF NOT EXISTS idx_workout_suggestion_cache_expires_at ON workout_suggestion_cache (expires_at);

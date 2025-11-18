@@ -10,11 +10,10 @@ use std::sync::Arc;
 pub async fn create_session(
     db_path: &str,
     model: String,
-    fast_model: String,
 ) -> std::result::Result<Session, YokuError> {
     // Ensure a global runtime exists when being invoked from foreign runtimes.
     let rt = crate::runtime::init_global_runtime_blocking();
-    let session = rt.block_on(Session::new(db_path, model, fast_model))?;
+    let session = rt.block_on(Session::new(db_path, model))?;
     Ok(session)
 }
 
@@ -77,21 +76,27 @@ pub async fn get_lifts_for_exercise(
     session: &Session,
     exercise_id: i64,
     limit: Option<i64>,
-) -> std::result::Result<Vec<Arc<LiftDataPoint>>, YokuError> {
+) -> std::result::Result<Vec<f64>, YokuError> {
     let rt = crate::runtime::init_global_runtime_blocking();
     let sets = rt.block_on(session.get_sets_for_exercise(exercise_id, limit))?;
 
-    let converted: Vec<Arc<LiftDataPoint>> = sets
-        .into_iter()
-        .map(|lift| {
-            Arc::new(LiftDataPoint {
-                timestamp: lift.created_at,
-                lift: lift.weight,
-            })
-        })
-        .collect();
+    let converted: Vec<f64> = sets.into_iter().map(|lift| lift.weight).collect();
 
     Ok(converted)
+}
+
+#[uniffi::export]
+pub async fn delete_workout_session(session: &Session, id: i64) -> Result<(), YokuError> {
+    let rt = crate::runtime::init_global_runtime_blocking();
+    rt.block_on(session.delete_workout(id))?;
+    Ok(())
+}
+
+#[uniffi::export]
+pub async fn delete_workout_set(session: &Session, id: i64) -> Result<(), YokuError> {
+    let rt = crate::runtime::init_global_runtime_blocking();
+    rt.block_on(session.delete_set(id))?;
+    Ok(())
 }
 
 #[uniffi::export]

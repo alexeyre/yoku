@@ -1,6 +1,6 @@
 use anyhow::Result;
-use sqlx::SqlitePool;
 use log::{debug, error, info, warn};
+use sqlx::SqlitePool;
 
 use crate::{
     db::models::{
@@ -81,7 +81,7 @@ pub async fn get_workout_session(pool: &SqlitePool, session_id: i64) -> Result<W
 
     sqlx::query_as::<_, WorkoutSession>(
         "SELECT id, user_id, name, date, duration_seconds, notes, intention, created_at, updated_at
-         FROM workout_sessions WHERE id = ?1"
+         FROM workout_sessions WHERE id = ?1",
     )
     .bind(session_id)
     .fetch_one(pool)
@@ -97,7 +97,7 @@ pub async fn get_all_workout_sessions(pool: &SqlitePool) -> Result<Vec<WorkoutSe
 
     sqlx::query_as::<_, WorkoutSession>(
         "SELECT id, user_id, name, date, duration_seconds, notes, intention, created_at, updated_at
-         FROM workout_sessions"
+         FROM workout_sessions",
     )
     .fetch_all(pool)
     .await
@@ -118,21 +118,19 @@ pub async fn update_workout_intention(
     );
 
     let now = chrono::Utc::now().timestamp();
-    sqlx::query(
-        "UPDATE workout_sessions SET intention = ?1, updated_at = ?2 WHERE id = ?3"
-    )
-    .bind(intention)
-    .bind(now)
-    .bind(session_id)
-    .execute(pool)
-    .await
-    .map_err(|e| {
-        error!(
-            "update_workout_intention failed for session_id {}: {}",
-            session_id, e
-        );
-        anyhow::Error::from(e)
-    })?;
+    sqlx::query("UPDATE workout_sessions SET intention = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(intention)
+        .bind(now)
+        .bind(session_id)
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            error!(
+                "update_workout_intention failed for session_id {}: {}",
+                session_id, e
+            );
+            anyhow::Error::from(e)
+        })?;
 
     info!("updated workout intention for session_id={}", session_id);
     Ok(())
@@ -158,7 +156,7 @@ pub async fn get_exercise(pool: &SqlitePool, exercise_id: i64) -> Result<Exercis
 
     sqlx::query_as::<_, Exercise>(
         "SELECT id, slug, name, description, created_at, updated_at
-         FROM exercises WHERE id = ?1"
+         FROM exercises WHERE id = ?1",
     )
     .bind(exercise_id)
     .fetch_one(pool)
@@ -172,7 +170,7 @@ pub async fn get_exercise(pool: &SqlitePool, exercise_id: i64) -> Result<Exercis
 pub async fn get_all_exercises(pool: &SqlitePool) -> Result<Vec<Exercise>> {
     debug!("get_all_exercises called");
     sqlx::query_as::<_, Exercise>(
-        "SELECT id, slug, name, description, created_at, updated_at FROM exercises"
+        "SELECT id, slug, name, description, created_at, updated_at FROM exercises",
     )
     .fetch_all(pool)
     .await
@@ -182,17 +180,15 @@ pub async fn get_all_exercises(pool: &SqlitePool) -> Result<Vec<Exercise>> {
     })
 }
 
-pub async fn get_or_create_exercise(
-    pool: &SqlitePool,
-    exercise_name: &str,
-) -> Result<Exercise> {
+pub async fn get_or_create_exercise(pool: &SqlitePool, exercise_name: &str) -> Result<Exercise> {
     debug!("get_or_create_exercise called name={}", exercise_name);
+    let slug = slugify(exercise_name);
 
     if let Some(exercise) = sqlx::query_as::<_, Exercise>(
         "SELECT id, slug, name, description, created_at, updated_at
-         FROM exercises WHERE name = ?1"
+         FROM exercises WHERE slug = ?1",
     )
-    .bind(exercise_name)
+    .bind(&slug)
     .fetch_optional(pool)
     .await?
     {
@@ -203,13 +199,12 @@ pub async fn get_or_create_exercise(
         return Ok(exercise);
     }
 
-    let slug = slugify(exercise_name);
     let now = chrono::Utc::now().timestamp();
 
     let created = sqlx::query_as::<_, Exercise>(
         "INSERT INTO exercises (slug, name, description, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?4)
-         RETURNING id, slug, name, description, created_at, updated_at"
+         RETURNING id, slug, name, description, created_at, updated_at",
     )
     .bind(slug)
     .bind(exercise_name)
@@ -234,7 +229,7 @@ pub async fn get_or_create_muscle(pool: &SqlitePool, muscle_name: &str) -> Resul
 
     if let Some(muscle) = sqlx::query_as::<_, Muscle>(
         "SELECT id, name, created_at, updated_at
-         FROM muscles WHERE name = ?1"
+         FROM muscles WHERE name = ?1",
     )
     .bind(muscle_name)
     .fetch_optional(pool)
@@ -252,7 +247,7 @@ pub async fn get_or_create_muscle(pool: &SqlitePool, muscle_name: &str) -> Resul
     let created = sqlx::query_as::<_, Muscle>(
         "INSERT INTO muscles (name, created_at, updated_at)
          VALUES (?1, ?2, ?2)
-         RETURNING id, name, created_at, updated_at"
+         RETURNING id, name, created_at, updated_at",
     )
     .bind(muscle_name)
     .bind(now)
@@ -275,7 +270,7 @@ pub async fn get_or_create_user(pool: &SqlitePool, username: &str) -> Result<Use
 
     if let Some(u) = sqlx::query_as::<_, User>(
         "SELECT id, username, created_at, updated_at
-         FROM users WHERE username = ?1"
+         FROM users WHERE username = ?1",
     )
     .bind(username)
     .fetch_optional(pool)
@@ -290,7 +285,7 @@ pub async fn get_or_create_user(pool: &SqlitePool, username: &str) -> Result<Use
     let created = sqlx::query_as::<_, User>(
         "INSERT INTO users (username, created_at, updated_at)
          VALUES (?1, ?2, ?2)
-         RETURNING id, username, created_at, updated_at"
+         RETURNING id, username, created_at, updated_at",
     )
     .bind(username)
     .bind(now)
@@ -324,7 +319,7 @@ pub async fn create_request_string(
     sqlx::query_as::<_, RequestString>(
         "INSERT INTO request_strings (user_id, string, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?3)
-         RETURNING id, user_id, string, created_at, updated_at"
+         RETURNING id, user_id, string, created_at, updated_at",
     )
     .bind(user_id)
     .bind(input)
@@ -368,7 +363,7 @@ pub async fn add_workout_set(
     );
 
     let max_index: Option<i64> = sqlx::query_scalar::<_, i64>(
-        "SELECT MAX(set_index) FROM workout_sets WHERE session_id = ?1 AND exercise_id = ?2"
+        "SELECT MAX(set_index) FROM workout_sets WHERE session_id = ?1 AND exercise_id = ?2",
     )
     .bind(session_id)
     .bind(exercise_id)
@@ -425,7 +420,7 @@ pub async fn add_multiple_sets_to_workout(
     );
 
     let max_index: Option<i64> = sqlx::query_scalar::<_, i64>(
-        "SELECT MAX(set_index) FROM workout_sets WHERE session_id = ?1 AND exercise_id = ?2"
+        "SELECT MAX(set_index) FROM workout_sets WHERE session_id = ?1 AND exercise_id = ?2",
     )
     .bind(session_id)
     .bind(exercise_id)
@@ -474,10 +469,7 @@ pub async fn add_multiple_sets_to_workout(
     Ok(created)
 }
 
-pub async fn get_sets_for_session(
-    pool: &SqlitePool,
-    session_id: i64,
-) -> Result<Vec<WorkoutSet>> {
+pub async fn get_sets_for_session(pool: &SqlitePool, session_id: i64) -> Result<Vec<WorkoutSet>> {
     debug!("get_sets_for_session called session_id={}", session_id);
     sqlx::query_as::<_, WorkoutSet>(
         "SELECT id, session_id, exercise_id, request_string_id, weight, reps, set_index, rpe, notes, created_at, updated_at
@@ -501,7 +493,7 @@ pub async fn update_workout_set(
     update: &UpdateWorkoutSet,
 ) -> Result<WorkoutSet> {
     debug!("update_workout_set called set_id={}", set_id);
-    
+
     let now = chrono::Utc::now().timestamp();
     sqlx::query_as::<_, WorkoutSet>(
         "UPDATE workout_sets SET
@@ -555,11 +547,10 @@ pub async fn update_workout_set_from_parsed(
         "update_workout_set_from_parsed called set_id={} parsed={:?}",
         set_id, parsed
     );
-    let original = get_workout_set_by_id(pool, set_id).await
-        .map_err(|e| {
-            error!("failed to load original set id {}: {}", set_id, e);
-            anyhow::Error::from(e)
-        })?;
+    let original = get_workout_set_by_id(pool, set_id).await.map_err(|e| {
+        error!("failed to load original set id {}: {}", set_id, e);
+        anyhow::Error::from(e)
+    })?;
 
     let exercise_id_opt = if !parsed.exercise.is_empty() {
         let exercise = get_or_create_exercise(pool, &parsed.exercise).await?;
@@ -586,7 +577,8 @@ pub async fn update_workout_set_from_parsed(
         notes: None,
     };
 
-    update_workout_set(pool, set_id, &update).await
+    update_workout_set(pool, set_id, &update)
+        .await
         .map_err(|e| {
             error!("failed to update set id {}: {}", set_id, e);
             anyhow::Error::from(e)
@@ -615,7 +607,7 @@ pub async fn get_exercise_entries(
         "get_exercise_entries called exercise_id={:?} limit={:?}",
         exercise_id, limit
     );
-    
+
     let sets = if let Some(limit) = limit {
         sqlx::query_as::<_, WorkoutSet>(
             "SELECT id, session_id, exercise_id, request_string_id, weight, reps, set_index, rpe, notes, created_at, updated_at
@@ -661,9 +653,7 @@ mod tests {
                 .init();
         });
 
-        let pool = SqlitePool::connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
         sqlx::query("PRAGMA journal_mode = WAL")
             .execute(&pool)
@@ -863,9 +853,10 @@ mod tests {
     async fn test_create_request_string_for_username() {
         let pool = setup_test_db().await;
 
-        let request = create_request_string_for_username(&pool, "testuser", "100kg x 5".to_string())
-            .await
-            .unwrap();
+        let request =
+            create_request_string_for_username(&pool, "testuser", "100kg x 5".to_string())
+                .await
+                .unwrap();
 
         assert_eq!(request.string, "100kg x 5");
         assert!(request.id > 0);
@@ -1177,7 +1168,9 @@ mod tests {
         .await
         .unwrap();
 
-        let entries = get_exercise_entries(&pool, exercise.id, None).await.unwrap();
+        let entries = get_exercise_entries(&pool, exercise.id, None)
+            .await
+            .unwrap();
         assert_eq!(entries.len(), 2);
     }
 
@@ -1209,7 +1202,9 @@ mod tests {
             .unwrap();
         }
 
-        let entries = get_exercise_entries(&pool, exercise.id, Some(3)).await.unwrap();
+        let entries = get_exercise_entries(&pool, exercise.id, Some(3))
+            .await
+            .unwrap();
         assert_eq!(entries.len(), 3);
     }
 

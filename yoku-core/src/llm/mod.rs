@@ -536,11 +536,46 @@ impl PromptBuilder {
     }
 
     pub fn system_input_classification_prompt(&self) -> String {
-        "You are a classifier for workout app commands. Determine if the user input is a workout intention/goal or a set to add. Return JSON with 'input_type' field: 'intention' if it's a workout goal/intention (e.g., 'I want to build muscle', 'focus on upper body', 'hypertrophy workout'), or 'set' if it's a set to log (e.g., 'bench press 100kg x 5', 'add 3 sets of squats'). Return only JSON: {\"input_type\": \"intention\" | \"set\"}".to_string()
+        r#"You are a command classifier for a workout tracking app. Analyze the user input and return a JSON array of commands to execute.
+
+Return a JSON object with a "commands" array. Each command should be fully parsed with all fields extracted.
+
+Command types:
+1. "add_set" - Add one or more workout sets. Fields: exercise (string), weight (number|null), reps (integer|null), rpe (number|null), set_count (integer|null, defaults to 1), tags (array of strings), aoi (string|null), original_string (string)
+   - If user says "add 3 sets of bench press 100kg x 5", return 3 separate add_set commands
+   - Parse exercise names, weights, reps, RPE from natural language
+   - RPE is rate of perceived exersion 0 is No effort, 1 Very light, 2 to 3 Light, 4 to 6 Moderate, 7 to 8 Vigorous, 9 Very Hard, and 10 is Maximum Effort. The scale can also be interpreted as the number of reps in reserve, where one rep in reserve is 9 (10 minus 1), etc. The user may say "one rep max" indicating 0 reps in reserve and an RPE 10 for example.
+   - Use known exercises from context when possible
+
+2. "remove_set" - Remove one or more sets. Fields: set_id (integer|null), description (string|null)
+   - If set_id is provided, use it directly
+   - If description is provided (e.g., "last bench press set"), the backend will resolve it
+   - If user says "remove the last 2 sets", return 2 remove_set commands
+
+3. "edit_set" - Edit an existing set. Fields: set_id (integer|null), description (string|null), exercise (string|null), weight (number|null), reps (integer|null), rpe (number|null)
+   - Only include fields that should be changed
+   - If user says "change last bench press to 105kg", include set_id or description pointing to the last bench press set, and weight=105.0
+   - If user says "no that should be 80kg" referring to most recent set, use description or set_id from recent sets
+
+4. "change_intention" - Change workout intention/goal. Fields: intention (string)
+   - Extract the intention from natural language
+
+5. "unknown" - Fallback for unclassifiable input. Fields: input (string)
+
+Examples:
+- "add 3 sets of bench press 100kg x 5" → [{"command_type": "add_set", "exercise": "Bench Press", "weight": 100.0, "reps": 5, "set_count": 1, "tags": [], "aoi": null, "original_string": "bench press 100kg x 5"}, ... (3 times)]
+- "remove the last 2 sets" → [{"command_type": "remove_set", "set_id": null, "description": "last set"}, {"command_type": "remove_set", "set_id": null, "description": "second to last set"}]
+- "change last bench press to 105kg" → [{"command_type": "edit_set", "set_id": null, "description": "last bench press set", "weight": 105.0, "exercise": null, "reps": null, "rpe": null}]
+- "no that should be 80kg" → [{"command_type": "edit_set", "set_id": null, "description": "most recent set", "weight": 80.0, ...}]
+
+Return only valid JSON: {"commands": [...]}"#.to_string()
     }
 
-    pub fn user_input_classification_prompt(&self, input: &str) -> String {
-        format!("Classify this user input: \"{}\"", input)
+    pub fn user_input_classification_prompt(&self, input: &str, workout_context: &str) -> String {
+        format!(
+            "User input: \"{}\"\n\nWorkout Context:\n{}\n\nAnalyze the input and return a JSON array of commands to execute. All fields should be fully parsed.",
+            input, workout_context
+        )
     }
 
     pub fn system_suggestion_prompt(&self) -> String {
@@ -705,6 +740,45 @@ pub struct InputClassification {
     pub input_type: InputType,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "command_type")]
+pub enum Command {
+    #[serde(rename = "add_set")]
+    AddSet {
+        exercise: String,
+        weight: Option<f64>,
+        reps: Option<i64>,
+        rpe: Option<f64>,
+        set_count: Option<i64>,
+        tags: Vec<String>,
+        aoi: Option<String>,
+        original_string: String,
+    },
+    #[serde(rename = "remove_set")]
+    RemoveSet {
+        set_id: Option<i64>,
+        description: Option<String>,
+    },
+    #[serde(rename = "edit_set")]
+    EditSet {
+        set_id: Option<i64>,
+        description: Option<String>,
+        exercise: Option<String>,
+        weight: Option<f64>,
+        reps: Option<i64>,
+        rpe: Option<f64>,
+    },
+    #[serde(rename = "change_intention")]
+    ChangeIntention { intention: String },
+    #[serde(rename = "unknown")]
+    Unknown { input: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandList {
+    pub commands: Vec<Command>,
+}
+
 pub async fn classify_input_type(
     llm: &LlmInterface,
     builder: &PromptBuilder,
@@ -712,13 +786,34 @@ pub async fn classify_input_type(
 ) -> Result<InputType> {
     debug!("classify_input_type called input_len={}", input.len());
     let system = builder.system_input_classification_prompt();
-    let user = builder.user_input_classification_prompt(input);
+    let user = builder.user_input_classification_prompt(input, "");
     let classification: InputClassification = llm.call_json(&system, &user).await?;
     info!(
         "classify_input_type classified as {:?}",
         classification.input_type
     );
     Ok(classification.input_type)
+}
+
+pub async fn classify_commands(
+    llm: &LlmInterface,
+    builder: &PromptBuilder,
+    input: &str,
+    workout_context: &str,
+) -> Result<Vec<Command>> {
+    debug!(
+        "classify_commands called input_len={} context_len={}",
+        input.len(),
+        workout_context.len()
+    );
+    let system = builder.system_input_classification_prompt();
+    let user = builder.user_input_classification_prompt(input, workout_context);
+    let command_list: CommandList = llm.call_json(&system, &user).await?;
+    info!(
+        "classify_commands returned {} commands",
+        command_list.commands.len()
+    );
+    Ok(command_list.commands)
 }
 
 pub async fn generate_workout_suggestions(

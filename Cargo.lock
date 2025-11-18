@@ -3566,6 +3566,7 @@ dependencies = [
  "chrono",
  "dotenv_codegen",
  "env_logger",
+ "futures",
  "log",
  "neo4rs",
  "num_cpus",
