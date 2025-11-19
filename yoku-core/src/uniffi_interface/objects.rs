@@ -40,6 +40,8 @@ pub struct WorkoutSession {
     pub name: Option<String>,
     pub date: chrono::NaiveDate,
     pub intention: Option<String>,
+    pub status: String,
+    pub duration_seconds: i64,
 }
 
 #[uniffi::export]
@@ -63,6 +65,18 @@ impl WorkoutSession {
     fn intention(&self) -> Option<String> {
         self.intention.clone()
     }
+    
+    /// Return the workout status ('in_progress' or 'completed').
+    fn status(&self) -> String {
+        self.status.clone()
+    }
+    
+    /// Return the duration/elapsed time in seconds.
+    /// For in-progress workouts, this is the elapsed time.
+    /// For completed workouts, this is the final duration.
+    fn duration_seconds(&self) -> i64 {
+        self.duration_seconds
+    }
 }
 
 impl TryFrom<db::models::WorkoutSession> for WorkoutSession {
@@ -81,6 +95,8 @@ impl TryFrom<db::models::WorkoutSession> for WorkoutSession {
             name: s.name,
             date,
             intention: s.intention,
+            status: s.status,
+            duration_seconds: s.duration_seconds,
         })
     }
 }

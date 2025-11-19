@@ -24,7 +24,6 @@ struct SetList: View {
 
 
     var body: some View {
-        let activeExercise = workoutState.activeExercise
         GeometryReader { geometry in
             ScrollView {
                 LazyVStack(spacing: 0) {
@@ -78,6 +77,7 @@ struct SetList: View {
                     previousSetCount: previousSetCounts[exercise.id],
                     availableWidth: availableWidth
                 )
+                .transition(.opacity.combined(with: .move(edge: .top)))
                 .onAppear {
                     // Initialize if not set
                     if previousSetCounts[exercise.id] == nil {
@@ -94,8 +94,10 @@ struct SetList: View {
                 if workoutState.isExpanded(exercise) {
                     ForEach(exercise.sets) { set in
                         Button {
-                            workoutState.setActiveExercise(exercise)
-                            workoutState.activeSetID = set.id
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                workoutState.setActiveExercise(exercise)
+                                workoutState.activeSetID = set.id
+                            }
                         } label: {
                             SetInformationView(set: set, availableWidth: availableWidth)
                         }
@@ -108,6 +110,7 @@ struct SetList: View {
                             ? Color.accentColor.opacity(0.06)
                             : Color.clear
                         )
+                        .animation(.easeInOut(duration: 0.2), value: set.id == workoutState.activeSetID)
                         .glowOnSetEvent(setID: set.backendID)
                         .gesture(
                             DragGesture(minimumDistance: 50)
@@ -124,10 +127,11 @@ struct SetList: View {
                         .onAppear {
                             seenSetIDs.insert(set.id)
                         }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: workoutState.exercises.map { $0.id })
         }
     }
     
@@ -141,13 +145,18 @@ struct SetList: View {
         
         var body: some View {
             Button {
-                workoutState.setActiveExercise(exercise)
-                workoutState.toggle(expansionFor: exercise, expandIfCollapsed: true)
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    workoutState.setActiveExercise(exercise)
+                }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    workoutState.toggle(expansionFor: exercise, expandIfCollapsed: true)
+                }
             } label: {
                 HStack(spacing: 6) {
                     Text(workoutState.isExpanded(exercise) ? "▼" : "▶")
                         .font(.appBody)
                         .foregroundStyle(.secondary)
+                        .animation(.easeInOut(duration: 0.2), value: workoutState.isExpanded(exercise))
 
                     Text(exercise.name)
                         .font(.appBody)
@@ -161,6 +170,7 @@ struct SetList: View {
                             .padding(.horizontal, 4)
                             .background(Color.accentColor.opacity(0.12))
                             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            .transition(.scale.combined(with: .opacity))
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -174,6 +184,7 @@ struct SetList: View {
                 ? Color.accentColor.opacity(0.06)
                 : Color.clear
             )
+            .animation(.easeInOut(duration: 0.2), value: exercise.id == workoutState.activeExerciseID)
             .glowOnExerciseEvent(exerciseID: exercise.backendID)
         }
     }
@@ -280,7 +291,7 @@ struct SetList: View {
                         .lineLimit(1)
                         .textFieldStyle(.plain)
                         .padding(0)
-                    Text("reps")
+                    Text(repsText == "1" ? "rep" : "reps")
                         .font(.appBody)
                         .foregroundStyle(.secondary)
                         .frame(width: 35, alignment: .leading)
@@ -300,6 +311,7 @@ struct SetList: View {
                         .font(.appBody)
                         .foregroundStyle(.tint)
                         .accessibilityLabel("Active set")
+                        .transition(.scale.combined(with: .opacity))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

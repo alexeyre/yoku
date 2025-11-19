@@ -1,15 +1,16 @@
 use crate::db;
 use crate::db::models::{Exercise, WorkoutSession};
 use crate::db::operations::{
-    add_multiple_sets_to_workout, add_workout_set, create_request_string_for_username,
-    create_workout_session, delete_workout_session, delete_workout_set, get_exercise_entries,
-    get_or_create_exercise, get_sets_for_session, get_workout_session, update_workout_intention,
-    update_workout_set_from_parsed,
+    add_multiple_sets_to_workout, add_workout_set, check_in_progress_workout_exists,
+    complete_workout_session, create_request_string_for_username, create_workout_session,
+    delete_workout_session, delete_workout_set, get_exercise_entries, get_in_progress_workout,
+    get_or_create_exercise, get_sets_for_session, get_workout_session, update_workout_duration,
+    update_workout_intention, update_workout_set_from_parsed,
 };
 use crate::llm::{LlmInterface, ParsedSet};
 use anyhow::Result;
 use futures::future;
-use log::{error, warn};
+use log::{debug, error, warn};
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 use std::sync::Arc;
@@ -75,15 +76,64 @@ impl Session {
         Ok(())
     }
 
-    pub async fn new_workout(&self) -> Result<()> {
-        let workout = create_workout_session(&self.db_pool, None, None, None, None).await?;
-        self.set_workout_id(workout.id).await
+    pub async fn new_workout(&self) -> Result<bool> {
+        // Check if in-progress workout exists
+        let had_existing = check_in_progress_workout_exists(&self.db_pool).await?;
+
+        if had_existing {
+            // Get the existing in-progress workout and complete it with 0 duration
+            if let Some(existing_workout) = get_in_progress_workout(&self.db_pool).await? {
+                complete_workout_session(&self.db_pool, existing_workout.id, 0, None).await?;
+                // Clear workout_id if it was the one we just completed
+                let current_id = self.get_workout_id().await;
+                if current_id == Some(existing_workout.id) {
+                    *self.workout_id.lock().await = None;
+                }
+            }
+        }
+
+        // Create new workout with in_progress status
+        let workout = create_workout_session(
+            &self.db_pool,
+            None,
+            None,
+            None,
+            None,
+            Some("in_progress".to_string()),
+        )
+        .await?;
+        self.set_workout_id(workout.id).await?;
+        Ok(had_existing)
     }
 
-    pub async fn new_workout_with_name(&self, name: &str) -> Result<()> {
-        let workout =
-            create_workout_session(&self.db_pool, None, Some(name.to_string()), None, None).await?;
-        self.set_workout_id(workout.id).await
+    pub async fn new_workout_with_name(&self, name: &str) -> Result<bool> {
+        // Check if in-progress workout exists
+        let had_existing = check_in_progress_workout_exists(&self.db_pool).await?;
+
+        if had_existing {
+            // Get the existing in-progress workout and complete it with 0 duration
+            if let Some(existing_workout) = get_in_progress_workout(&self.db_pool).await? {
+                complete_workout_session(&self.db_pool, existing_workout.id, 0, None).await?;
+                // Clear workout_id if it was the one we just completed
+                let current_id = self.get_workout_id().await;
+                if current_id == Some(existing_workout.id) {
+                    *self.workout_id.lock().await = None;
+                }
+            }
+        }
+
+        // Create new workout with in_progress status
+        let workout = create_workout_session(
+            &self.db_pool,
+            None,
+            Some(name.to_string()),
+            None,
+            None,
+            Some("in_progress".to_string()),
+        )
+        .await?;
+        self.set_workout_id(workout.id).await?;
+        Ok(had_existing)
     }
 
     pub async fn get_sets_for_exercise(
@@ -244,7 +294,10 @@ impl Session {
         &self,
         set_id: i64,
         update: &crate::db::models::UpdateWorkoutSet,
-    ) -> Result<(db::models::WorkoutSet, Vec<crate::uniffi_interface::modifications::Modification>)> {
+    ) -> Result<(
+        db::models::WorkoutSet,
+        Vec<crate::uniffi_interface::modifications::Modification>,
+    )> {
         use crate::uniffi_interface::modifications::{Modification, ModificationType};
 
         let updated = db::operations::update_workout_set(&self.db_pool, set_id, update).await?;
@@ -423,9 +476,7 @@ impl Session {
                     ))
                 }
             }
-            crate::llm::Command::ChangeIntention { .. } => {
-                Ok(vec![])
-            }
+            crate::llm::Command::ChangeIntention { .. } => Ok(vec![]),
             crate::llm::Command::Unknown { input } => {
                 warn!("Unknown command for input: {}", input);
                 let parsed = ParsedSet {
@@ -448,7 +499,97 @@ impl Session {
     }
 
     pub async fn get_all_workouts(&self) -> Result<Vec<WorkoutSession>> {
-        db::operations::get_all_workout_sessions(&self.db_pool).await
+        // Only return completed workouts for LLM reference and history
+        db::operations::get_all_workout_sessions(&self.db_pool, Some("completed")).await
+    }
+
+    pub async fn get_all_workouts_including_in_progress(&self) -> Result<Vec<WorkoutSession>> {
+        // Return all workouts (both completed and in-progress) for UI list
+        db::operations::get_all_workout_sessions(&self.db_pool, None).await
+    }
+
+    pub async fn get_in_progress_workout(&self) -> Result<Option<WorkoutSession>> {
+        get_in_progress_workout(&self.db_pool).await
+    }
+
+    pub async fn complete_workout(&self, duration_seconds: i64) -> Result<()> {
+        let workout_id = self.get_workout_id().await;
+        if let Some(workout_id) = workout_id {
+            // Check if workout has a user-specified intention
+            let workout = get_workout_session(&self.db_pool, workout_id).await?;
+            let final_intention = if workout.intention.is_some() && !workout.intention.as_ref().unwrap().is_empty() {
+                // User has specified an intention, use it
+                workout.intention
+            } else {
+                // No user-specified intention, generate LLM summary
+                let sets = get_sets_for_session(&self.db_pool, workout_id).await?;
+                
+                // Group sets by exercise
+                let mut exercise_counts: std::collections::HashMap<i64, i64> =
+                    std::collections::HashMap::new();
+                for set in &sets {
+                    *exercise_counts.entry(set.exercise_id).or_insert(0) += 1;
+                }
+
+                // Get exercise names
+                let all_exercises = self.get_all_exercises().await?;
+                let exercise_map: std::collections::HashMap<i64, String> =
+                    all_exercises.into_iter().map(|e| (e.id, e.name)).collect();
+
+                // Build current exercises list
+                let current_exercises: Vec<(String, i64)> = exercise_counts
+                    .iter()
+                    .filter_map(|(ex_id, count)| exercise_map.get(ex_id).map(|name| (name.clone(), *count)))
+                    .collect();
+
+                if current_exercises.is_empty() {
+                    None
+                } else {
+                    // Get known exercises for context
+                    let known_exercises: Vec<String> = exercise_map.values().cloned().collect();
+                    let ctx = crate::llm::PromptContext {
+                        known_exercises,
+                        ..Default::default()
+                    };
+                    let builder = crate::llm::PromptBuilder::new(ctx);
+
+                    // Generate summary using LLM
+                    match crate::llm::generate_workout_summary(
+                        self.llm_backend.as_ref(),
+                        &builder,
+                        &current_exercises,
+                    )
+                    .await
+                    {
+                        Ok(summary) => Some(summary),
+                        Err(e) => {
+                            warn!("Failed to generate workout summary: {}", e);
+                            None
+                        }
+                    }
+                }
+            };
+            
+            complete_workout_session(&self.db_pool, workout_id, duration_seconds, final_intention).await?;
+            *self.workout_id.lock().await = None;
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("No active workout to complete"))
+        }
+    }
+
+    pub async fn update_workout_elapsed_time(&self, elapsed_seconds: i64) -> Result<()> {
+        let workout_id = self.get_workout_id().await;
+        if let Some(workout_id) = workout_id {
+            update_workout_duration(&self.db_pool, workout_id, elapsed_seconds).await?;
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("No active workout to update"))
+        }
+    }
+
+    pub async fn check_in_progress_workout_exists(&self) -> Result<bool> {
+        check_in_progress_workout_exists(&self.db_pool).await
     }
 
     pub async fn add_set_from_string(&self, request_string: &str) -> Result<()> {
@@ -819,6 +960,10 @@ impl Session {
                 } else {
                     Some(intention.trim().to_string())
                 };
+                debug!(
+                    "Intention is {}",
+                    intention_opt.as_ref().unwrap_or(&"None".to_string())
+                );
                 self.set_workout_intention(intention_opt).await
             }
             crate::llm::Command::Unknown { input } => {
@@ -971,5 +1116,77 @@ impl Session {
             &past_performance,
         )
         .await
+    }
+
+    pub async fn get_workout_summary(&self, force_regenerate: bool) -> Result<String> {
+        let session_id = self
+            .get_workout_id()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("No active workout in session"))?;
+
+        // Check if workout has a user-specified intention
+        let workout = get_workout_session(&self.db_pool, session_id).await?;
+        
+        // If there's an intention, use it (whether user-specified or cached LLM summary)
+        // We can't distinguish between user-specified and LLM-generated, so we'll
+        // only regenerate if force_regenerate is true AND intention is empty
+        if let Some(ref intention) = workout.intention {
+            if !intention.is_empty() {
+                if !force_regenerate {
+                    // Not forcing regenerate, return cached intention/summary
+                    return Ok(intention.clone());
+                }
+                // Force regenerate requested, but there's an intention
+                // Assume it's user-specified and don't overwrite it
+                return Ok(intention.clone());
+            }
+        }
+
+        // No user-specified intention, generate a new summary
+        // Get current workout data
+        let sets = get_sets_for_session(&self.db_pool, session_id).await?;
+
+        // Group sets by exercise
+        let mut exercise_counts: std::collections::HashMap<i64, i64> =
+            std::collections::HashMap::new();
+        for set in &sets {
+            *exercise_counts.entry(set.exercise_id).or_insert(0) += 1;
+        }
+
+        // Get exercise names
+        let all_exercises = self.get_all_exercises().await?;
+        let exercise_map: std::collections::HashMap<i64, String> =
+            all_exercises.into_iter().map(|e| (e.id, e.name)).collect();
+
+        // Build current exercises list
+        let current_exercises: Vec<(String, i64)> = exercise_counts
+            .iter()
+            .filter_map(|(ex_id, count)| exercise_map.get(ex_id).map(|name| (name.clone(), *count)))
+            .collect();
+
+        if current_exercises.is_empty() {
+            return Ok("No exercises added yet.".to_string());
+        }
+
+        // Get known exercises for context
+        let known_exercises: Vec<String> = exercise_map.values().cloned().collect();
+        let ctx = crate::llm::PromptContext {
+            known_exercises,
+            ..Default::default()
+        };
+        let builder = crate::llm::PromptBuilder::new(ctx);
+
+        // Generate summary using LLM
+        let summary = crate::llm::generate_workout_summary(
+            self.llm_backend.as_ref(),
+            &builder,
+            &current_exercises,
+        )
+        .await?;
+
+        // Cache the summary in the database
+        update_workout_intention(&self.db_pool, session_id, Some(summary.clone())).await?;
+
+        Ok(summary)
     }
 }

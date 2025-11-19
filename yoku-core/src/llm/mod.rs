@@ -580,7 +580,7 @@ Return only valid JSON: {"commands": [...]}"#.to_string()
 
     pub fn user_input_classification_prompt(&self, input: &str, workout_context: &str) -> String {
         let mut context_parts = vec![format!("User input: \"{}\"", input)];
-        
+
         // Add set context information
         if let Some(selected_id) = self.ctx.selected_set_backend_id {
             context_parts.push(format!(
@@ -588,9 +588,11 @@ Return only valid JSON: {"commands": [...]}"#.to_string()
                 selected_id, selected_id
             ));
         }
-        
+
         if !self.ctx.visible_set_backend_ids.is_empty() {
-            let visible_ids_str = self.ctx.visible_set_backend_ids
+            let visible_ids_str = self
+                .ctx
+                .visible_set_backend_ids
                 .iter()
                 .map(|id| id.to_string())
                 .collect::<Vec<_>>()
@@ -600,10 +602,10 @@ Return only valid JSON: {"commands": [...]}"#.to_string()
                 visible_ids_str
             ));
         }
-        
+
         context_parts.push(format!("Workout Context:\n{}", workout_context));
         context_parts.push("Analyze the input and return a JSON array of commands to execute. All fields should be fully parsed.".to_string());
-        
+
         context_parts.join("\n\n")
     }
 
@@ -680,6 +682,37 @@ Return only valid JSON."#.to_string()
         format!(
             "Current workout:\n{}\n{}Past Performance Summary:\n{}\n{}\nProvide 3-5 SPECIFIC, ACTIONABLE suggestions. For each suggestion:\n\n1. EXERCISE RECOMMENDATIONS: If suggesting a new exercise, specify the exact exercise name, rep range, and RPE (e.g., \"Add Barbell Rows: 3 sets of 8-10 reps @7-8 RPE\")\n\n2. PROGRESSION SUGGESTIONS: If suggesting progression on an existing exercise, specify:\n   - Exact weight change (e.g., \"Increase Bench Press from 85kg to 87.5kg\")\n   - Rep range (e.g., \"Try 4-5 reps @8 RPE\")\n   - Base this on the past performance data provided\n\n3. COMPLETION SUGGESTIONS: If the workout is already very taxing (high volume, high intensity, or user appears fatigued), suggest wrapping up with a completion-type suggestion\n\n4. VOLUME SUGGESTIONS: If suggesting more volume, specify exactly how many sets/reps to add (e.g., \"Add 1 more set to Squats at 90% working weight\")\n\nBase all suggestions on the actual past performance data. Be specific with weights, reps, and RPE ranges. Avoid vague advice.\n\nReturn JSON with a 'suggestions' array.",
             exercises_list, intention_section, past_performance, workout_intensity_note
+        )
+    }
+
+    pub fn system_summary_prompt(&self) -> String {
+        r#"You are an expert fitness coach. Generate a brief, concise summary of the current workout based on the exercises and sets performed.
+
+The summary should be:
+- Brief (1-2 sentences, max 100 characters)
+- Descriptive of the workout focus (e.g., "Upper body strength session", "Full body compound movements", "Push-focused hypertrophy")
+- Natural and readable
+
+Return only a plain text string, no JSON, no quotes, just the summary text."#.to_string()
+    }
+
+    pub fn user_summary_prompt(
+        &self,
+        current_exercises: &[(String, i64)], // (exercise_name, set_count)
+    ) -> String {
+        if current_exercises.is_empty() {
+            return "No exercises added yet.".to_string();
+        }
+
+        let exercises_list: String = current_exercises
+            .iter()
+            .map(|(name, count)| format!("- {} ({} sets)", name, count))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        format!(
+            "Current workout exercises:\n{}\n\nGenerate a brief summary of this workout.",
+            exercises_list
         )
     }
 }
@@ -842,6 +875,9 @@ pub async fn classify_commands(
         "classify_commands returned {} commands",
         command_list.commands.len()
     );
+    for command in &command_list.commands {
+        debug!("Command: {:?}", command);
+    }
     Ok(command_list.commands)
 }
 
@@ -871,6 +907,26 @@ pub async fn generate_workout_suggestions(
         res.suggestions.len()
     );
     Ok(res.suggestions)
+}
+
+pub async fn generate_workout_summary(
+    llm: &LlmInterface,
+    builder: &PromptBuilder,
+    current_exercises: &[(String, i64)],
+) -> Result<String> {
+    debug!(
+        "generate_workout_summary called exercises={}",
+        current_exercises.len()
+    );
+    let system = builder.system_summary_prompt();
+    let user = builder.user_summary_prompt(current_exercises);
+
+    // For summary, we want plain text, not JSON
+    let summary = llm.call(&system, &user).await?;
+    let summary = summary.trim().to_string();
+    
+    info!("generate_workout_summary returned: {}", summary);
+    Ok(summary)
 }
 
 #[cfg(test)]

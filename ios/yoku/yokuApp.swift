@@ -34,6 +34,21 @@ struct yokuApp: App {
                         ProgressView().opacity(0)  // keep layout consistent
                     }
                     .padding()
+                    Button {
+                        Task { @MainActor in
+                            do {
+                                try await session.resetDatabase()
+                                isDatabaseReady = false
+                            } catch {
+                                setupError = error
+                            }
+                        }
+                    } label: {
+                        Text("[ RESET ]")
+                            .font(.appButton)
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
                 } else {
                     // Lightweight splash/loading while DB initializes
                     VStack(spacing: 12) {
@@ -96,6 +111,7 @@ private struct RootView: View {
     // Interaction state
     @State private var isPerformingSelection = false
     @State private var selectionError: Error?
+    @State private var showWorkoutOverwriteWarning = false
 
     // Settings navigation
     @State private var showSettings = false
@@ -259,23 +275,41 @@ private struct RootView: View {
                     SettingsView()
                 }
             }
+            .alert("Workout Overwritten", isPresented: $showWorkoutOverwriteWarning) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("A workout was already in progress. It has been completed and saved.")
+            }
             .navigationDestination(isPresented: $navigateToWorkout) {
                 ContentView()
                     .environmentObject(session)
                     .navigationBarBackButtonHidden(true)
             }
             .task {
-                // Avoid FFI in previews
                 if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
                     return
                 }
-                if workoutSessionList.isEmpty {
-                    await loadWorkouts()
+                await loadWorkouts()
+                // Auto-navigate to in-progress workout if it exists
+                if session.activeWorkoutSession != nil {
+                    navigateToWorkout = true
+                }
+            }
+            .onChange(of: session.activeWorkoutSessionId) { oldValue, newValue in
+                // Auto-navigate when an in-progress workout is detected (but not if we're already navigating)
+                if newValue != nil && oldValue == nil && !navigateToWorkout {
+                    // Use a small delay to ensure this happens after initial setup
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 50_000_000) // 0.05 seconds
+                        if !navigateToWorkout {
+                            navigateToWorkout = true
+                        }
+                    }
                 }
             }
         }
     }
-
+        
     // MARK: - Data loading
 
     @MainActor
@@ -301,6 +335,7 @@ private struct RootView: View {
         isPerformingSelection = true
         do {
             try await session.setActiveWorkoutSessionId(ws.id())
+            // Navigate to workout view
             navigateToWorkout = true
         } catch {
             selectionError = error
@@ -313,8 +348,11 @@ private struct RootView: View {
         selectionError = nil
         isPerformingSelection = true
         do {
-            try await session.createBlankWorkoutSession()
+            let hadExisting = try await session.createBlankWorkoutSession()
             await loadWorkouts()
+            if hadExisting {
+                showWorkoutOverwriteWarning = true
+            }
             navigateToWorkout = true
         } catch {
             selectionError = error

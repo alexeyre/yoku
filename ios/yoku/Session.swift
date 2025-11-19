@@ -76,6 +76,9 @@ final class Session: ObservableObject {
     @Published private(set) var activeWorkoutSession: YokuUniffi.WorkoutSession?
     @Published var elapsedTime: TimeInterval = 0
     @Published var lastError: Error?
+    @Published var workoutStartTime: Date?
+    @Published var isTimerPaused: Bool = false
+    @Published var intention: String?
 
     // New: lifts map keyed by backend exercise id
     @Published private(set) var liftsByExerciseId: [Int64: [Double]] = [:]
@@ -98,11 +101,21 @@ final class Session: ObservableObject {
     }
 
     init() {}
+    
 
     func setup(dbPath: String, model: String) async throws {
         do {
             let snapshot = try await backend.setup(dbPath: dbPath, model: model)
             apply(snapshot: snapshot)
+            // Check for in-progress workout and load it automatically
+            if let inProgressWorkout = try? await backend.getInProgressWorkoutSession() {
+                // Restore elapsed time from database
+                let elapsedFromDB = inProgressWorkout.durationSeconds()
+                elapsedTime = TimeInterval(elapsedFromDB)
+                workoutStartTime = Date().addingTimeInterval(-elapsedTime)
+                
+                try await setActiveWorkoutSessionId(inProgressWorkout.id())
+            }
             lastError = nil
         } catch {
             lastError = error
@@ -141,6 +154,20 @@ final class Session: ObservableObject {
         do {
             let snapshot = try await backend.setActiveWorkoutSessionId(id)
             apply(snapshot: snapshot)
+            // If this is an in-progress workout, restore timer from duration_seconds
+            if let workout = activeWorkoutSession, workout.status() == "in_progress" {
+                // Restore elapsed time from database
+                let elapsedFromDB = workout.durationSeconds()
+                elapsedTime = TimeInterval(elapsedFromDB)
+                
+                // Set start time to now minus elapsed time (so timer continues correctly)
+                workoutStartTime = Date().addingTimeInterval(-elapsedTime)
+                
+                // Start timer if not already running
+                if !isTimerRunning {
+                    startTimer()
+                }
+            }
             lastError = nil
         } catch {
             lastError = error
@@ -148,11 +175,15 @@ final class Session: ObservableObject {
         }
     }
 
-    func createBlankWorkoutSession() async throws {
+    func createBlankWorkoutSession() async throws -> Bool {
         do {
-            let snapshot = try await backend.createBlankWorkoutSession()
+            let hadExisting = try await backend.createBlankWorkoutSession()
+            let snapshot = try await backend.snapshot()
             apply(snapshot: snapshot)
+            workoutStartTime = Date()
+            startTimer()
             lastError = nil
+            return hadExisting
         } catch {
             lastError = error
             throw mapCoordinatorError(error)
@@ -229,22 +260,76 @@ final class Session: ObservableObject {
     // MARK: - Timer control
 
     func startTimer() {
-        guard timerCancellable == nil else { return }
+        guard timerCancellable == nil && !isTimerPaused else { return }
+        if workoutStartTime == nil {
+            workoutStartTime = Date().addingTimeInterval(-elapsedTime)
+        }
         timerCancellable = Timer.publish(every: 1.0, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.elapsedTime += 1
+                // Periodically save elapsed time to database (every 10 seconds)
+                if Int(self.elapsedTime) % 10 == 0 {
+                    Task {
+                        try? await self.saveElapsedTime()
+                    }
+                }
             }
+    }
+    
+    private func saveElapsedTime() async throws {
+        guard let _ = activeWorkoutSession else { return }
+        try await backend.updateWorkoutElapsedTime(elapsedSeconds: Int64(elapsedTime))
+    }
+
+    func pauseTimer() {
+        timerCancellable?.cancel()
+        timerCancellable = nil
+        isTimerPaused = true
+        // Save elapsed time when pausing
+        Task {
+            try? await saveElapsedTime()
+        }
+    }
+
+    func resumeTimer() {
+        guard isTimerPaused else { return }
+        isTimerPaused = false
+        startTimer()
     }
 
     func stopTimer() {
         timerCancellable?.cancel()
         timerCancellable = nil
+        // Don't reset elapsedTime here - that's for pause/resume
     }
 
     var isTimerRunning: Bool {
-        timerCancellable != nil
+        timerCancellable != nil && !isTimerPaused
+    }
+    
+    func completeWorkout() async throws {
+        let durationSeconds = Int64(elapsedTime)
+        try await backend.completeWorkoutSession(durationSeconds: durationSeconds)
+        stopTimer()
+        elapsedTime = 0
+        workoutStartTime = nil
+        isTimerPaused = false
+        // Refresh to clear active workout
+        let snapshot = try await backend.snapshot()
+        apply(snapshot: snapshot)
+    }
+    
+    func getInProgressWorkout() async throws -> YokuUniffi.WorkoutSession? {
+        return try? await backend.getInProgressWorkoutSession()
+    }
+    
+    func getWorkoutSummary(forceRegenerate: Bool = false) async throws -> String {
+        guard let session = session else {
+            throw SessionError.backendNotInitialized
+        }
+        return try await YokuUniffi.getWorkoutSummary(session: session, forceRegenerate: forceRegenerate)
     }
 
     // MARK: - Accessors
@@ -252,6 +337,10 @@ final class Session: ObservableObject {
     var activeExercise: ExerciseModel? {
         guard let id = activeExerciseID else { return nil }
         return exercises.first { $0.id == id }
+    }
+    
+    var activeWorkoutSessionId: Int64? {
+        activeWorkoutSession?.id()
     }
 
     func indexOfActiveSet(in exercise: ExerciseModel?) -> Int? {
@@ -314,6 +403,7 @@ final class Session: ObservableObject {
         activeWorkoutSession = snapshot.workout
         liftsByExerciseId = snapshot.liftsByExerciseId
         updateExercises(with: snapshot.exercises, sets: snapshot.sets)
+        intention = snapshot.intention
         
         if emitGlowEvents {
             for mod in snapshot.modifications {
@@ -428,6 +518,10 @@ final class Session: ObservableObject {
         exerciseIDMap = [:]
         setIDMap = [:]
         liftsByExerciseId = [:]
+        elapsedTime = 0
+        workoutStartTime = nil
+        isTimerPaused = false
+        stopTimer()
     }
 
     private func mapCoordinatorError(_ error: Error) -> Error {
@@ -488,6 +582,7 @@ private actor BackendSessionCoordinator {
         let sets: [YokuUniffi.WorkoutSet]
         let liftsByExerciseId: [Int64: [Double]]
         let modifications: [YokuUniffi.Modification]
+        let intention: String?
         
         func withModifications(_ mods: [YokuUniffi.Modification]) -> Snapshot {
             Snapshot(
@@ -496,7 +591,8 @@ private actor BackendSessionCoordinator {
                 exercises: exercises,
                 sets: sets,
                 liftsByExerciseId: liftsByExerciseId,
-                modifications: mods
+                modifications: mods,
+                intention: intention
             )
         }
     }
@@ -529,6 +625,11 @@ private actor BackendSessionCoordinator {
         databasePath = dbPath
         self.model = model
         return try await snapshot(for: created)
+    }
+    
+    func isInProgressWorkout() async throws -> Bool {
+        let session = try requireSession()
+        return try await YokuUniffi.checkInProgressWorkoutExists(session: session)
     }
 
     func snapshot() async throws -> Snapshot {
@@ -564,10 +665,30 @@ private actor BackendSessionCoordinator {
             session: session, exerciseId: id, limit: 100)
     }
 
-    func createBlankWorkoutSession() async throws -> Snapshot {
+    func createBlankWorkoutSession() async throws -> Bool {
         let session = try requireSession()
-        try await YokuUniffi.createBlankWorkoutSession(session: session)
-        return try await snapshot(for: session)
+        let hadExisting = try await YokuUniffi.createBlankWorkoutSession(session: session)
+        return hadExisting
+    }
+    
+    func completeWorkoutSession(durationSeconds: Int64) async throws {
+        let session = try requireSession()
+        try await YokuUniffi.completeWorkoutSession(session: session, durationSeconds: durationSeconds)
+    }
+    
+    func getInProgressWorkoutSession() async throws -> YokuUniffi.WorkoutSession? {
+        let session = try requireSession()
+        return try? await YokuUniffi.getInProgressWorkoutSession(session: session)
+    }
+    
+    func checkInProgressWorkoutExists() async throws -> Bool {
+        let session = try requireSession()
+        return try await YokuUniffi.checkInProgressWorkoutExists(session: session)
+    }
+    
+    func updateWorkoutElapsedTime(elapsedSeconds: Int64) async throws {
+        let session = try requireSession()
+        try await YokuUniffi.updateWorkoutElapsedTime(session: session, elapsedSeconds: elapsedSeconds)
     }
 
     func resetDatabase() async throws -> Snapshot {
@@ -632,6 +753,13 @@ private actor BackendSessionCoordinator {
             }
             return dict
         }
+        
+        let intention: String? = try await {
+            if let activeSession = try await YokuUniffi.getInProgressWorkoutSession(session: session) {
+                return activeSession.intention()
+            }
+            return nil
+        }()
 
         return Snapshot(
             session: session,
@@ -639,7 +767,8 @@ private actor BackendSessionCoordinator {
             exercises: exercises,
             sets: sets,
             liftsByExerciseId: liftsByExerciseId,
-            modifications: []
+            modifications: [],
+            intention: intention
         )
     }
 

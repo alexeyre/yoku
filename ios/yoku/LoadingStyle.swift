@@ -95,6 +95,6 @@ extension EnvironmentValues {
     }
 
     private struct LoadingStyleKey: EnvironmentKey {
-        static let defaultValue: LoadingStyle = LoadingStyle(rawValue: UserDefaults.standard.string(forKey: LoadingSettings.appStorageKey) ?? "") ?? .normal
+        static let defaultValue: LoadingStyle = LoadingStyle(rawValue: UserDefaults.standard.string(forKey: LoadingSettings.appStorageKey) ?? "") ?? .arrows
     }
 }

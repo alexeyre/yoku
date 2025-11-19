@@ -123,7 +123,8 @@ pub async fn get_all_workout_sessions(
     session: &Session,
 ) -> std::result::Result<Vec<Arc<WorkoutSession>>, YokuError> {
     let rt = crate::runtime::init_global_runtime_blocking();
-    let workouts = rt.block_on(session.get_all_workouts())?;
+    // Get all workouts including in-progress for UI list
+    let workouts = rt.block_on(session.get_all_workouts_including_in_progress())?;
 
     let converted: Vec<Arc<WorkoutSession>> = workouts
         .into_iter()
@@ -186,9 +187,55 @@ pub async fn set_session_workout_session_id(
 }
 
 #[uniffi::export]
-pub async fn create_blank_workout_session(session: &Session) -> std::result::Result<(), YokuError> {
+pub async fn create_blank_workout_session(
+    session: &Session,
+) -> std::result::Result<bool, YokuError> {
     let rt = crate::runtime::init_global_runtime_blocking();
-    rt.block_on(session.new_workout())?;
+    let had_existing = rt.block_on(session.new_workout())?;
+    Ok(had_existing)
+}
+
+#[uniffi::export]
+pub async fn complete_workout_session(
+    session: &Session,
+    duration_seconds: i64,
+) -> std::result::Result<(), YokuError> {
+    let rt = crate::runtime::init_global_runtime_blocking();
+    rt.block_on(session.complete_workout(duration_seconds))?;
+    Ok(())
+}
+
+#[uniffi::export]
+pub async fn get_in_progress_workout_session(
+    session: &Session,
+) -> std::result::Result<Option<Arc<WorkoutSession>>, YokuError> {
+    let rt = crate::runtime::init_global_runtime_blocking();
+    let workout = rt.block_on(session.get_in_progress_workout())?;
+    match workout {
+        Some(w) => {
+            let workout_uniffi: WorkoutSession = w.try_into()?;
+            Ok(Some(Arc::new(workout_uniffi)))
+        }
+        None => Ok(None),
+    }
+}
+
+#[uniffi::export]
+pub async fn check_in_progress_workout_exists(
+    session: &Session,
+) -> std::result::Result<bool, YokuError> {
+    let rt = crate::runtime::init_global_runtime_blocking();
+    let exists = rt.block_on(session.check_in_progress_workout_exists())?;
+    Ok(exists)
+}
+
+#[uniffi::export]
+pub async fn update_workout_elapsed_time(
+    session: &Session,
+    elapsed_seconds: i64,
+) -> std::result::Result<(), YokuError> {
+    let rt = crate::runtime::init_global_runtime_blocking();
+    rt.block_on(session.update_workout_elapsed_time(elapsed_seconds))?;
     Ok(())
 }
 
@@ -245,6 +292,16 @@ pub async fn get_workout_suggestions(
         .map(|s| Arc::new(WorkoutSuggestion::from(s)))
         .collect();
     Ok(converted)
+}
+
+#[uniffi::export]
+pub async fn get_workout_summary(
+    session: &Session,
+    force_regenerate: bool,
+) -> std::result::Result<String, YokuError> {
+    let rt = crate::runtime::init_global_runtime_blocking();
+    let summary = rt.block_on(session.get_workout_summary(force_regenerate))?;
+    Ok(summary)
 }
 
 #[uniffi::export]

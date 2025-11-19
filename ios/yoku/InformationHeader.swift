@@ -6,17 +6,35 @@
 //
 
 import SwiftUI
+import YokuUniffi
 
 struct InformationHeader: View {
     // Read values from the shared WorkoutState
     @EnvironmentObject var workoutState: Session
     
     @Environment(\.dismiss) private var dismiss
+    @State private var showCompleteConfirmation = false
 
-    // Statically-provided items (still local)
-    let workoutName: String = "FULL BODY A"
+    var totalVolume: String {
+        let volume = workoutState.exercises.reduce(0.0) { total, exercise in
+            let exerciseVolume = exercise.sets.reduce(0.0) { sum, set in
+                sum + (set.weight * Double(set.reps))
+            }
+            return total + exerciseVolume
+        }
+        // Format as kg with one decimal place, or show "0 kg" if no volume
+        if volume > 0 {
+            return String(format: "%.1f kg", volume)
+        } else {
+            return "0 kg"
+        }
+    }
+    
     var dateString: String {
-        // return today's date
+        if let workout = workoutState.activeWorkoutSession {
+            return workout.date()
+        }
+        // Fallback to today's date if no workout
         let date = Date()
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -47,19 +65,40 @@ struct InformationHeader: View {
         VStack {
                 HStack(spacing: 16) {
                     Button {
-                        // stop workout action
-                        //workoutState.stopWorkoutSession()
-                        dismiss()
+                        showCompleteConfirmation = true
                     } label: {
                         Text("[ STOP ]")
                             .font(.appButton)
                             .foregroundStyle(.red)
                     }
                     .buttonStyle(.plain)
+                    .confirmationDialog(
+                        "Complete Workout?",
+                        isPresented: $showCompleteConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Complete", role: .destructive) {
+                            Task {
+                                do {
+                                    try await workoutState.completeWorkout()
+                                    dismiss()
+                                } catch {
+                                    // Handle error - could show alert
+                                    print("Error completing workout: \(error)")
+                                }
+                            }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    }
 
                     Button {
+                        if workoutState.isTimerRunning && !workoutState.isTimerPaused {
+                            workoutState.pauseTimer()
+                        } else if workoutState.isTimerPaused {
+                            workoutState.resumeTimer()
+                        }
                     } label: {
-                        Text(workoutState.isTimerRunning ? "[ PAUSE ]" : "[ RESUME ]")
+                        Text(workoutState.isTimerRunning && !workoutState.isTimerPaused ? "[ PAUSE ]" : "[ RESUME ]")
                             .font(.appButton)
                             .foregroundStyle(.primary)
                     }
@@ -78,17 +117,17 @@ struct InformationHeader: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 6)
             VStack(spacing: 4) {
-                // First line: workout name and date
+                // First line: elapsed time and date
                 HStack(spacing: 12) {
-                    labeledValue("WORKOUT", workoutName)
+                    labeledValue("ELAPSED", elapsedString)
                     Spacer(minLength: 0)
                     Divider().frame(height: 12).opacity(0.15)
                     labeledValue("DATE", dateString, mirrored: true)
                 }
                 
-                // Second line: elapsed and current exercise
+                // Second line: total volume and current exercise
                 HStack(spacing: 12) {
-                    labeledValue("ELAPSED", elapsedString)
+                    labeledValue("VOLUME", totalVolume)
                     Divider().frame(height: 12).opacity(0.15)
                     Spacer(minLength: 0)
                     labeledValue("CURRENT", currentExercise, mirrored: true)
@@ -122,6 +161,7 @@ struct InformationHeader: View {
                 Text(value)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .animation(.easeInOut(duration: 0.2), value: value)
                 Text(label)
                     .opacity(0.7)
             } else {
@@ -130,6 +170,7 @@ struct InformationHeader: View {
                 Text(value)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .animation(.easeInOut(duration: 0.2), value: value)
             }
         }
     }

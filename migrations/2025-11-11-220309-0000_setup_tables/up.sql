@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS request_strings (
 -- Workout sessions
 -- - `user_id` is nullable so sessions can be created without a user context
 -- - `date` defaults to today (YYYY-MM-DD)
+-- - `status` indicates if workout is 'in_progress' or 'completed'
 CREATE TABLE IF NOT EXISTS workout_sessions (
     id INTEGER NOT NULL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -60,6 +61,7 @@ CREATE TABLE IF NOT EXISTS workout_sessions (
     duration_seconds INTEGER NOT NULL DEFAULT 0,
     notes TEXT,
     intention TEXT,
+    status TEXT NOT NULL DEFAULT 'in_progress' CHECK(status IN ('in_progress', 'completed')),
     created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
     updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
 );
@@ -84,6 +86,7 @@ CREATE TABLE IF NOT EXISTS workout_sets (
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_workout_sessions_user_date ON workout_sessions (user_id, date);
+CREATE INDEX IF NOT EXISTS idx_workout_sessions_status ON workout_sessions (status);
 CREATE INDEX IF NOT EXISTS idx_request_strings_user_id ON request_strings (user_id);
 CREATE INDEX IF NOT EXISTS idx_exercise_muscles_exercise_id ON exercise_muscles (exercise_id);
 CREATE INDEX IF NOT EXISTS idx_exercise_muscles_muscle_id ON exercise_muscles (muscle_id);
@@ -106,3 +109,6 @@ CREATE TABLE IF NOT EXISTS workout_suggestion_cache (
 
 CREATE INDEX IF NOT EXISTS idx_workout_suggestion_cache_session_id ON workout_suggestion_cache (session_id);
 CREATE INDEX IF NOT EXISTS idx_workout_suggestion_cache_expires_at ON workout_suggestion_cache (expires_at);
+
+-- Update existing rows to have status 'completed' (for data migration)
+UPDATE workout_sessions SET status = 'completed' WHERE status IS NULL;

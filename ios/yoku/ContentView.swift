@@ -19,6 +19,13 @@ struct ContentView: View {
                 .environmentObject(session)
         }
         .environmentObject(session)
+        .onAppear {
+            // Auto-start timer if workout exists and timer not already running
+            if session.activeWorkoutSession != nil && !session.isTimerRunning && session.workoutStartTime == nil {
+                session.workoutStartTime = Date()
+                session.startTimer()
+            }
+        }
     }
 }
 

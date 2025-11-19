@@ -145,8 +145,8 @@ async fn cmd_list() -> Result<()> {
 }
 
 async fn cmd_create(name: Option<String>) -> Result<()> {
-    // create_workout_session(user_id, name, notes, duration_seconds)
-    let ws = create_workout_session(None, name, None, None).await?;
+    // create_workout_session(user_id, name, notes, duration_seconds, status)
+    let ws = create_workout_session(None, name, None, None, None).await?;
     println!(
         "Created workout session: {} (id {})",
         ws.name.unwrap_or_default(),

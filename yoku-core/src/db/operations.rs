@@ -43,20 +43,22 @@ pub async fn create_workout_session(
     name: Option<String>,
     notes: Option<String>,
     duration_seconds: Option<i64>,
+    status: Option<String>,
 ) -> Result<WorkoutSession> {
     debug!(
-        "create_workout_session called user_id={:?} name={:?} duration_seconds={:?}",
-        user_id, name, duration_seconds
+        "create_workout_session called user_id={:?} name={:?} duration_seconds={:?} status={:?}",
+        user_id, name, duration_seconds, status
     );
 
     let date = chrono::Utc::now().date_naive().to_string();
     let dur_secs = duration_seconds.unwrap_or(0) as i64;
+    let status_str = status.unwrap_or_else(|| "in_progress".to_string());
     let now = chrono::Utc::now().timestamp();
 
     let res = sqlx::query_as::<_, WorkoutSession>(
-        "INSERT INTO workout_sessions (user_id, name, date, duration_seconds, notes, intention, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
-         RETURNING id, user_id, name, date, duration_seconds, notes, intention, created_at, updated_at"
+        "INSERT INTO workout_sessions (user_id, name, date, duration_seconds, notes, intention, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+         RETURNING id, user_id, name, date, duration_seconds, notes, intention, status, created_at, updated_at"
     )
     .bind(user_id)
     .bind(name)
@@ -64,6 +66,7 @@ pub async fn create_workout_session(
     .bind(dur_secs)
     .bind(notes)
     .bind(None::<String>)
+    .bind(status_str)
     .bind(now)
     .fetch_one(pool)
     .await
@@ -72,7 +75,7 @@ pub async fn create_workout_session(
         anyhow::Error::from(e)
     })?;
 
-    info!("created workout session id={}", res.id);
+    info!("created workout session id={} status={}", res.id, res.status);
     Ok(res)
 }
 
@@ -80,7 +83,7 @@ pub async fn get_workout_session(pool: &SqlitePool, session_id: i64) -> Result<W
     debug!("get_workout_session called session_id={}", session_id);
 
     sqlx::query_as::<_, WorkoutSession>(
-        "SELECT id, user_id, name, date, duration_seconds, notes, intention, created_at, updated_at
+        "SELECT id, user_id, name, date, duration_seconds, notes, intention, status, created_at, updated_at
          FROM workout_sessions WHERE id = ?1",
     )
     .bind(session_id)
@@ -92,19 +95,32 @@ pub async fn get_workout_session(pool: &SqlitePool, session_id: i64) -> Result<W
     })
 }
 
-pub async fn get_all_workout_sessions(pool: &SqlitePool) -> Result<Vec<WorkoutSession>> {
-    debug!("get_all_workout_sessions called");
+pub async fn get_all_workout_sessions(
+    pool: &SqlitePool,
+    status_filter: Option<&str>,
+) -> Result<Vec<WorkoutSession>> {
+    debug!("get_all_workout_sessions called status_filter={:?}", status_filter);
 
-    sqlx::query_as::<_, WorkoutSession>(
-        "SELECT id, user_id, name, date, duration_seconds, notes, intention, created_at, updated_at
-         FROM workout_sessions",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| {
-        warn!("get_all_workout_sessions failed: {}", e);
-        anyhow::Error::from(e)
-    })
+    let query = if let Some(status) = status_filter {
+        sqlx::query_as::<_, WorkoutSession>(
+            "SELECT id, user_id, name, date, duration_seconds, notes, intention, status, created_at, updated_at
+             FROM workout_sessions WHERE status = ?1",
+        )
+        .bind(status)
+    } else {
+        sqlx::query_as::<_, WorkoutSession>(
+            "SELECT id, user_id, name, date, duration_seconds, notes, intention, status, created_at, updated_at
+             FROM workout_sessions",
+        )
+    };
+
+    query
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            warn!("get_all_workout_sessions failed: {}", e);
+            anyhow::Error::from(e)
+        })
 }
 
 pub async fn update_workout_intention(
@@ -149,6 +165,101 @@ pub async fn delete_workout_session(pool: &SqlitePool, session_id: i64) -> Resul
         })?;
 
     Ok(result.rows_affected())
+}
+
+pub async fn get_in_progress_workout(pool: &SqlitePool) -> Result<Option<WorkoutSession>> {
+    debug!("get_in_progress_workout called");
+
+    let result = sqlx::query_as::<_, WorkoutSession>(
+        "SELECT id, user_id, name, date, duration_seconds, notes, intention, status, created_at, updated_at
+         FROM workout_sessions WHERE status = 'in_progress' LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        warn!("get_in_progress_workout failed: {}", e);
+        anyhow::Error::from(e)
+    })?;
+
+    Ok(result)
+}
+
+pub async fn complete_workout_session(
+    pool: &SqlitePool,
+    session_id: i64,
+    duration_seconds: i64,
+    intention: Option<String>,
+) -> Result<()> {
+    debug!(
+        "complete_workout_session called session_id={} duration_seconds={} intention={:?}",
+        session_id, duration_seconds, intention.is_some()
+    );
+
+    let now = chrono::Utc::now().timestamp();
+    sqlx::query(
+        "UPDATE workout_sessions SET status = 'completed', duration_seconds = ?1, intention = ?2, updated_at = ?3 WHERE id = ?4",
+    )
+    .bind(duration_seconds)
+    .bind(intention.as_ref())
+    .bind(now)
+    .bind(session_id)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        error!(
+            "complete_workout_session failed for session_id {}: {}",
+            session_id, e
+        );
+        anyhow::Error::from(e)
+    })?;
+
+    info!("completed workout session id={} duration={}", session_id, duration_seconds);
+    Ok(())
+}
+
+pub async fn check_in_progress_workout_exists(pool: &SqlitePool) -> Result<bool> {
+    debug!("check_in_progress_workout_exists called");
+
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workout_sessions WHERE status = 'in_progress'",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        warn!("check_in_progress_workout_exists failed: {}", e);
+        anyhow::Error::from(e)
+    })?;
+
+    Ok(count > 0)
+}
+
+pub async fn update_workout_duration(
+    pool: &SqlitePool,
+    session_id: i64,
+    duration_seconds: i64,
+) -> Result<()> {
+    debug!(
+        "update_workout_duration called session_id={} duration_seconds={}",
+        session_id, duration_seconds
+    );
+
+    let now = chrono::Utc::now().timestamp();
+    sqlx::query("UPDATE workout_sessions SET duration_seconds = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(duration_seconds)
+        .bind(now)
+        .bind(session_id)
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            error!(
+                "update_workout_duration failed for session_id {}: {}",
+                session_id, e
+            );
+            anyhow::Error::from(e)
+        })?;
+
+    info!("updated workout duration for session_id={} duration={}", session_id, duration_seconds);
+    Ok(())
 }
 
 pub async fn get_exercise(pool: &SqlitePool, exercise_id: i64) -> Result<Exercise> {
@@ -677,7 +788,7 @@ mod tests {
     async fn test_create_workout_session() {
         let pool = setup_test_db().await;
 
-        let session = create_workout_session(&pool, None, None, None, None)
+        let session = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
 
@@ -698,6 +809,7 @@ mod tests {
             Some("Test Workout".to_string()),
             Some("Test notes".to_string()),
             Some(3600),
+            None,
         )
         .await
         .unwrap();
@@ -713,7 +825,7 @@ mod tests {
     async fn test_get_workout_session() {
         let pool = setup_test_db().await;
 
-        let created = create_workout_session(&pool, None, None, None, None)
+        let created = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
         let retrieved = get_workout_session(&pool, created.id).await.unwrap();
@@ -735,14 +847,14 @@ mod tests {
     async fn test_get_all_workout_sessions() {
         let pool = setup_test_db().await;
 
-        create_workout_session(&pool, None, None, None, None)
+        create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
-        create_workout_session(&pool, None, None, None, None)
+        create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
 
-        let sessions = get_all_workout_sessions(&pool).await.unwrap();
+        let sessions = get_all_workout_sessions(&pool, None).await.unwrap();
         assert_eq!(sessions.len(), 2);
     }
 
@@ -750,7 +862,7 @@ mod tests {
     async fn test_delete_workout_session() {
         let pool = setup_test_db().await;
 
-        let session = create_workout_session(&pool, None, None, None, None)
+        let session = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
         let rows = delete_workout_session(&pool, session.id).await.unwrap();
@@ -866,7 +978,7 @@ mod tests {
     async fn test_add_workout_set() {
         let pool = setup_test_db().await;
 
-        let session = create_workout_session(&pool, None, None, None, None)
+        let session = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
         let exercise = get_or_create_exercise(&pool, "Bench Press").await.unwrap();
@@ -899,7 +1011,7 @@ mod tests {
     async fn test_add_workout_set_index_increment() {
         let pool = setup_test_db().await;
 
-        let session = create_workout_session(&pool, None, None, None, None)
+        let session = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
         let exercise = get_or_create_exercise(&pool, "Bench Press").await.unwrap();
@@ -940,7 +1052,7 @@ mod tests {
     async fn test_add_multiple_sets_to_workout() {
         let pool = setup_test_db().await;
 
-        let session = create_workout_session(&pool, None, None, None, None)
+        let session = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
         let exercise = get_or_create_exercise(&pool, "Bench Press").await.unwrap();
@@ -974,7 +1086,7 @@ mod tests {
     async fn test_get_sets_for_session() {
         let pool = setup_test_db().await;
 
-        let session = create_workout_session(&pool, None, None, None, None)
+        let session = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
         let exercise = get_or_create_exercise(&pool, "Bench Press").await.unwrap();
@@ -1017,7 +1129,7 @@ mod tests {
     async fn test_update_workout_set() {
         let pool = setup_test_db().await;
 
-        let session = create_workout_session(&pool, None, None, None, None)
+        let session = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
         let exercise = get_or_create_exercise(&pool, "Bench Press").await.unwrap();
@@ -1060,7 +1172,7 @@ mod tests {
     async fn test_update_workout_set_partial() {
         let pool = setup_test_db().await;
 
-        let session = create_workout_session(&pool, None, None, None, None)
+        let session = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
         let exercise = get_or_create_exercise(&pool, "Bench Press").await.unwrap();
@@ -1097,7 +1209,7 @@ mod tests {
     async fn test_delete_workout_set() {
         let pool = setup_test_db().await;
 
-        let session = create_workout_session(&pool, None, None, None, None)
+        let session = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
         let exercise = get_or_create_exercise(&pool, "Bench Press").await.unwrap();
@@ -1129,10 +1241,10 @@ mod tests {
     async fn test_get_exercise_entries() {
         let pool = setup_test_db().await;
 
-        let session1 = create_workout_session(&pool, None, None, None, None)
+        let session1 = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
-        let session2 = create_workout_session(&pool, None, None, None, None)
+        let session2 = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
         let exercise = get_or_create_exercise(&pool, "Bench Press").await.unwrap();
@@ -1182,7 +1294,7 @@ mod tests {
         let user = get_or_create_user(&pool, "testuser").await.unwrap();
 
         for i in 0..5 {
-            let session = create_workout_session(&pool, None, None, None, None)
+            let session = create_workout_session(&pool, None, None, None, None, None)
                 .await
                 .unwrap();
             let request = create_request_string(&pool, user.id, format!("100kg x 5 {}", i))
@@ -1212,7 +1324,7 @@ mod tests {
     async fn test_update_workout_set_from_parsed() {
         let pool = setup_test_db().await;
 
-        let session = create_workout_session(&pool, None, None, None, None)
+        let session = create_workout_session(&pool, None, None, None, None, None)
             .await
             .unwrap();
         let exercise = get_or_create_exercise(&pool, "Bench Press").await.unwrap();
