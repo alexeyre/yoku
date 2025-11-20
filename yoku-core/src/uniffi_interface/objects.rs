@@ -39,43 +39,35 @@ pub struct WorkoutSession {
     pub id: i64,
     pub name: Option<String>,
     pub date: chrono::NaiveDate,
-    pub intention: Option<String>,
     pub status: String,
     pub duration_seconds: i64,
+    pub summary: Option<String>,
 }
 
 #[uniffi::export]
 impl WorkoutSession {
-    /// Return the session id.
-    fn id(&self) -> i64 {
+        fn id(&self) -> i64 {
         self.id
     }
 
-    /// Return the session name.
-    fn name(&self) -> Option<String> {
+        fn name(&self) -> Option<String> {
         self.name.clone()
     }
 
     fn date(&self) -> String {
-        // Return a date-only representation (ISO-like) for the session date.
         self.date.format("%Y-%m-%d").to_string()
     }
 
-    /// Return the workout intention/purpose, if set.
-    fn intention(&self) -> Option<String> {
-        self.intention.clone()
-    }
-    
-    /// Return the workout status ('in_progress' or 'completed').
-    fn status(&self) -> String {
+        fn status(&self) -> String {
         self.status.clone()
     }
-    
-    /// Return the duration/elapsed time in seconds.
-    /// For in-progress workouts, this is the elapsed time.
-    /// For completed workouts, this is the final duration.
-    fn duration_seconds(&self) -> i64 {
+
+                fn duration_seconds(&self) -> i64 {
         self.duration_seconds
+    }
+
+        fn summary(&self) -> Option<String> {
+        self.summary.clone()
     }
 }
 
@@ -94,9 +86,9 @@ impl TryFrom<db::models::WorkoutSession> for WorkoutSession {
             id: s.id,
             name: s.name,
             date,
-            intention: s.intention,
             status: s.status,
             duration_seconds: s.duration_seconds,
+            summary: s.summary,
         })
     }
 }
@@ -113,34 +105,28 @@ pub struct WorkoutSet {
 
 #[uniffi::export]
 impl WorkoutSet {
-    /// Return the set id.
-    fn id(&self) -> i64 {
+        fn id(&self) -> i64 {
         self.id
     }
 
-    /// Return the associated exercise id.
-    fn exercise_id(&self) -> i64 {
+        fn exercise_id(&self) -> i64 {
         self.exercise_id
     }
 
-    /// Return the weight of the set.
-    fn weight(&self) -> f64 {
+        fn weight(&self) -> f64 {
         self.weight
     }
 
-    /// Return the number of reps in the set.
-    fn reps(&self) -> i64 {
+        fn reps(&self) -> i64 {
         self.reps
     }
 
-    /// Return the RPE (Rating of Perceived Exertion) of the set, if present.
-    fn rpe(&self) -> Option<f64> {
+        fn rpe(&self) -> Option<f64> {
         debug!("RPE: {:?}", self.rpe);
         self.rpe
     }
 
-    /// Return the notes for the set, if present.
-    fn notes(&self) -> Option<String> {
+        fn notes(&self) -> Option<String> {
         self.notes.clone()
     }
 }
@@ -198,6 +184,32 @@ impl From<crate::llm::WorkoutSuggestion> for WorkoutSuggestion {
             suggestion_type: s.suggestion_type,
             exercise_name: s.exercise_name,
             reasoning: s.reasoning,
+        }
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct WorkoutSummary {
+    pub message: String,
+    pub emoji: String,
+}
+
+#[uniffi::export]
+impl WorkoutSummary {
+    fn message(&self) -> String {
+        self.message.clone()
+    }
+
+    fn emoji(&self) -> String {
+        self.emoji.clone()
+    }
+}
+
+impl From<crate::llm::WorkoutSummary> for WorkoutSummary {
+    fn from(summary: crate::llm::WorkoutSummary) -> Self {
+        WorkoutSummary {
+            message: summary.message,
+            emoji: summary.emoji,
         }
     }
 }

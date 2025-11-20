@@ -3,7 +3,9 @@ use crate::db::models::UpdateWorkoutSet;
 use crate::session::Session;
 use crate::uniffi_interface::errors::YokuError;
 use crate::uniffi_interface::modifications::{Modification, UpdateWorkoutSetResult};
-use crate::uniffi_interface::objects::{Exercise, WorkoutSession, WorkoutSet, WorkoutSuggestion};
+use crate::uniffi_interface::objects::{
+    Exercise, WorkoutSession, WorkoutSet, WorkoutSuggestion, WorkoutSummary,
+};
 use log::*;
 use std::sync::Arc;
 
@@ -12,7 +14,6 @@ pub async fn create_session(
     db_path: &str,
     model: String,
 ) -> std::result::Result<Session, YokuError> {
-    // Ensure a global runtime exists when being invoked from foreign runtimes.
     let rt = crate::runtime::init_global_runtime_blocking();
     let session = rt.block_on(Session::new(db_path, model))?;
     Ok(session)
@@ -20,7 +21,6 @@ pub async fn create_session(
 
 #[uniffi::export]
 pub async fn reset_database(session: &Session) -> std::result::Result<(), YokuError> {
-    // Ensure runtime is initialized and run database reset on it.
     let rt = crate::runtime::init_global_runtime_blocking();
     rt.block_on(async {
         db::drop_all_tables(&session.db_pool).await?;
@@ -31,30 +31,6 @@ pub async fn reset_database(session: &Session) -> std::result::Result<(), YokuEr
 }
 
 // #[uniffi::export]
-// pub async fn add_set_from_string(
-//     session: &Session,
-//     request_string: &str,
-// ) -> std::result::Result<Vec<Modification>, YokuError> {
-//     debug!("Adding set from string: {}", request_string);
-//     let rt = crate::runtime::init_global_runtime_blocking();
-//     let trimmed = request_string.trim();
-//     if trimmed.is_empty() {
-//         return Ok(vec![]);
-//     }
-//     let parsed = crate::llm::ParsedSet {
-//         exercise: trimmed.to_string(),
-//         weight: None,
-//         reps: None,
-//         rpe: None,
-//         set_count: Some(1),
-//         tags: vec![],
-//         aoi: None,
-//         original_string: trimmed.to_string(),
-//     };
-//     let modifications = rt
-//         .block_on(session.add_set_from_parsed_with_modifications(&parsed))?;
-//     Ok(modifications)
-// }
 
 #[derive(uniffi::Object)]
 pub struct LiftDataPoint {
@@ -123,7 +99,6 @@ pub async fn get_all_workout_sessions(
     session: &Session,
 ) -> std::result::Result<Vec<Arc<WorkoutSession>>, YokuError> {
     let rt = crate::runtime::init_global_runtime_blocking();
-    // Get all workouts including in-progress for UI list
     let workouts = rt.block_on(session.get_all_workouts_including_in_progress())?;
 
     let converted: Vec<Arc<WorkoutSession>> = workouts
@@ -272,16 +247,6 @@ pub async fn get_session_workout_session(
 }
 
 #[uniffi::export]
-pub async fn set_workout_intention(
-    session: &Session,
-    intention: Option<String>,
-) -> std::result::Result<(), YokuError> {
-    let rt = crate::runtime::init_global_runtime_blocking();
-    rt.block_on(session.set_workout_intention(intention))?;
-    Ok(())
-}
-
-#[uniffi::export]
 pub async fn get_workout_suggestions(
     session: &Session,
 ) -> std::result::Result<Vec<Arc<WorkoutSuggestion>>, YokuError> {
@@ -297,11 +262,10 @@ pub async fn get_workout_suggestions(
 #[uniffi::export]
 pub async fn get_workout_summary(
     session: &Session,
-    force_regenerate: bool,
-) -> std::result::Result<String, YokuError> {
+) -> std::result::Result<WorkoutSummary, YokuError> {
     let rt = crate::runtime::init_global_runtime_blocking();
-    let summary = rt.block_on(session.get_workout_summary(force_regenerate))?;
-    Ok(summary)
+    let summary = rt.block_on(session.get_workout_summary())?;
+    Ok(WorkoutSummary::from(summary))
 }
 
 #[uniffi::export]

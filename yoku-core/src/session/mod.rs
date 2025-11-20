@@ -5,9 +5,9 @@ use crate::db::operations::{
     complete_workout_session, create_request_string_for_username, create_workout_session,
     delete_workout_session, delete_workout_set, get_exercise_entries, get_in_progress_workout,
     get_or_create_exercise, get_sets_for_session, get_workout_session, update_workout_duration,
-    update_workout_intention, update_workout_set_from_parsed,
+    update_workout_set_from_parsed, update_workout_summary,
 };
-use crate::llm::{LlmInterface, ParsedSet};
+use crate::llm::{LlmInterface, ParsedSet, WorkoutSummary};
 use anyhow::Result;
 use futures::future;
 use log::{debug, error, warn};
@@ -20,7 +20,7 @@ use tokio::sync::Mutex;
 pub struct Session {
     pub workout_id: Mutex<Option<i64>>,
     pub db_pool: SqlitePool,
-    pub llm_backend: Arc<LlmInterface>, // Normal model for parsing and suggestions
+    pub llm_backend: Arc<LlmInterface>,
 }
 
 const fn get_openai_api_key() -> &'static str {
@@ -29,7 +29,6 @@ const fn get_openai_api_key() -> &'static str {
 
 impl Session {
     pub async fn new(db_path: &str, model: String) -> Result<Self> {
-        // Create SQLx pool - SQLite will create the database file if it doesn't exist
         let options = SqliteConnectOptions::new()
             .filename(db_path)
             .create_if_missing(true);
@@ -37,7 +36,6 @@ impl Session {
             .await
             .map_err(|e| anyhow::anyhow!(format!("Failed to create DB pool: {}", e)))?;
 
-        // Set SQLite PRAGMAs
         sqlx::query("PRAGMA journal_mode = WAL")
             .execute(&pool)
             .await?;
@@ -48,7 +46,6 @@ impl Session {
             .execute(&pool)
             .await?;
 
-        // Run migrations - this will create tables if they don't exist
         db::init_database(&pool).await?;
 
         let llm_backend = Arc::new(
@@ -70,21 +67,17 @@ impl Session {
     }
 
     pub async fn set_workout_id(&self, workout_id: i64) -> Result<()> {
-        // Validate the workout exists
         let _ = get_workout_session(&self.db_pool, workout_id).await?;
         *self.workout_id.lock().await = Some(workout_id);
         Ok(())
     }
 
     pub async fn new_workout(&self) -> Result<bool> {
-        // Check if in-progress workout exists
         let had_existing = check_in_progress_workout_exists(&self.db_pool).await?;
 
         if had_existing {
-            // Get the existing in-progress workout and complete it with 0 duration
             if let Some(existing_workout) = get_in_progress_workout(&self.db_pool).await? {
-                complete_workout_session(&self.db_pool, existing_workout.id, 0, None).await?;
-                // Clear workout_id if it was the one we just completed
+                complete_workout_session(&self.db_pool, existing_workout.id, 0).await?;
                 let current_id = self.get_workout_id().await;
                 if current_id == Some(existing_workout.id) {
                     *self.workout_id.lock().await = None;
@@ -92,7 +85,6 @@ impl Session {
             }
         }
 
-        // Create new workout with in_progress status
         let workout = create_workout_session(
             &self.db_pool,
             None,
@@ -107,14 +99,11 @@ impl Session {
     }
 
     pub async fn new_workout_with_name(&self, name: &str) -> Result<bool> {
-        // Check if in-progress workout exists
         let had_existing = check_in_progress_workout_exists(&self.db_pool).await?;
 
         if had_existing {
-            // Get the existing in-progress workout and complete it with 0 duration
             if let Some(existing_workout) = get_in_progress_workout(&self.db_pool).await? {
-                complete_workout_session(&self.db_pool, existing_workout.id, 0, None).await?;
-                // Clear workout_id if it was the one we just completed
+                complete_workout_session(&self.db_pool, existing_workout.id, 0).await?;
                 let current_id = self.get_workout_id().await;
                 if current_id == Some(existing_workout.id) {
                     *self.workout_id.lock().await = None;
@@ -122,7 +111,6 @@ impl Session {
             }
         }
 
-        // Create new workout with in_progress status
         let workout = create_workout_session(
             &self.db_pool,
             None,
@@ -245,20 +233,21 @@ impl Session {
             )
             .await?;
 
+            let set_ids: Vec<i64> = created_sets.iter().map(|s| s.id).collect();
             if is_new_exercise {
                 modifications.push(Modification {
                     modification_type: ModificationType::ExerciseAdded,
                     set_id: None,
+                    set_ids: set_ids.clone(),
                     exercise_id: Some(exercise.id),
                 });
             } else {
-                for set in created_sets {
-                    modifications.push(Modification {
-                        modification_type: ModificationType::SetAdded,
-                        set_id: Some(set.id),
-                        exercise_id: None,
-                    });
-                }
+                modifications.push(Modification {
+                    modification_type: ModificationType::SetAdded,
+                    set_id: Some(set_ids[0]), 
+                    set_ids: set_ids.clone(),
+                    exercise_id: Some(exercise.id),
+                });
             }
         } else {
             let created_set = add_workout_set(
@@ -275,14 +264,16 @@ impl Session {
             if is_new_exercise {
                 modifications.push(Modification {
                     modification_type: ModificationType::ExerciseAdded,
-                    set_id: None,
+                    set_id: Some(created_set.id),
+                    set_ids: vec![created_set.id],
                     exercise_id: Some(exercise.id),
                 });
             } else {
                 modifications.push(Modification {
                     modification_type: ModificationType::SetAdded,
                     set_id: Some(created_set.id),
-                    exercise_id: None,
+                    set_ids: vec![created_set.id],
+                    exercise_id: Some(exercise.id), 
                 });
             }
         }
@@ -305,7 +296,8 @@ impl Session {
         let modifications = vec![Modification {
             modification_type: ModificationType::SetModified,
             set_id: Some(set_id),
-            exercise_id: None,
+            set_ids: vec![set_id],
+            exercise_id: Some(updated.exercise_id), 
         }];
 
         Ok((updated, modifications))
@@ -317,12 +309,16 @@ impl Session {
     ) -> Result<Vec<crate::uniffi_interface::modifications::Modification>> {
         use crate::uniffi_interface::modifications::{Modification, ModificationType};
 
+        let sets = get_sets_for_session(&self.db_pool, self.get_workout_id().await.unwrap()).await?;
+        let exercise_id = sets.iter().find(|s| s.id == set_id).map(|s| s.exercise_id);
+
         delete_workout_set(&self.db_pool, set_id).await?;
 
         Ok(vec![Modification {
             modification_type: ModificationType::SetRemoved,
             set_id: Some(set_id),
-            exercise_id: None,
+            set_ids: vec![set_id],
+            exercise_id,
         }])
     }
 
@@ -336,19 +332,25 @@ impl Session {
         if workout_id.is_none() {
             return Err(anyhow::anyhow!("No active workout session"));
         }
+        let workout_id = workout_id.unwrap();
+
+        let current_summary = get_workout_session(&self.db_pool, workout_id)
+            .await
+            .ok()
+            .and_then(|w| w.summary);
+
+        let exercises = self.get_all_exercises().await?;
+        let exercise_map: std::collections::HashMap<i64, String> =
+            exercises.iter().map(|e| (e.id, e.name.clone())).collect();
+        let known_exercises: Vec<String> = exercises.iter().map(|e| e.name.clone()).collect();
 
         let workout_context = self.build_workout_context_string().await?;
 
-        let known_exercises: Vec<String> = self
-            .get_all_exercises()
-            .await?
-            .into_iter()
-            .map(|exercise| exercise.name)
-            .collect();
         let ctx = crate::llm::PromptContext {
             known_exercises,
             selected_set_backend_id,
             visible_set_backend_ids,
+            current_summary,
             ..Default::default()
         };
         let builder = crate::llm::PromptBuilder::new(ctx);
@@ -367,9 +369,6 @@ impl Session {
         }
 
         let sets = self.get_all_sets().await?;
-        let exercises = self.get_all_exercises().await?;
-        let exercise_map: std::collections::HashMap<i64, String> =
-            exercises.iter().map(|e| (e.id, e.name.clone())).collect();
 
         let mut all_modifications = Vec::new();
 
@@ -476,7 +475,20 @@ impl Session {
                     ))
                 }
             }
-            crate::llm::Command::ChangeIntention { .. } => Ok(vec![]),
+            crate::llm::Command::UpdateSummary { message, emoji } => {
+                let session_id = self
+                    .get_workout_id()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("No active workout in session"))?;
+                
+                let summary_json = serde_json::json!({
+                    "message": message.trim(),
+                    "emoji": emoji.trim()
+                });
+                
+                update_workout_summary(&self.db_pool, session_id, summary_json.to_string()).await?;
+                Ok(vec![])
+            }
             crate::llm::Command::Unknown { input } => {
                 warn!("Unknown command for input: {}", input);
                 let parsed = ParsedSet {
@@ -499,12 +511,10 @@ impl Session {
     }
 
     pub async fn get_all_workouts(&self) -> Result<Vec<WorkoutSession>> {
-        // Only return completed workouts for LLM reference and history
         db::operations::get_all_workout_sessions(&self.db_pool, Some("completed")).await
     }
 
     pub async fn get_all_workouts_including_in_progress(&self) -> Result<Vec<WorkoutSession>> {
-        // Return all workouts (both completed and in-progress) for UI list
         db::operations::get_all_workout_sessions(&self.db_pool, None).await
     }
 
@@ -515,62 +525,7 @@ impl Session {
     pub async fn complete_workout(&self, duration_seconds: i64) -> Result<()> {
         let workout_id = self.get_workout_id().await;
         if let Some(workout_id) = workout_id {
-            // Check if workout has a user-specified intention
-            let workout = get_workout_session(&self.db_pool, workout_id).await?;
-            let final_intention = if workout.intention.is_some() && !workout.intention.as_ref().unwrap().is_empty() {
-                // User has specified an intention, use it
-                workout.intention
-            } else {
-                // No user-specified intention, generate LLM summary
-                let sets = get_sets_for_session(&self.db_pool, workout_id).await?;
-                
-                // Group sets by exercise
-                let mut exercise_counts: std::collections::HashMap<i64, i64> =
-                    std::collections::HashMap::new();
-                for set in &sets {
-                    *exercise_counts.entry(set.exercise_id).or_insert(0) += 1;
-                }
-
-                // Get exercise names
-                let all_exercises = self.get_all_exercises().await?;
-                let exercise_map: std::collections::HashMap<i64, String> =
-                    all_exercises.into_iter().map(|e| (e.id, e.name)).collect();
-
-                // Build current exercises list
-                let current_exercises: Vec<(String, i64)> = exercise_counts
-                    .iter()
-                    .filter_map(|(ex_id, count)| exercise_map.get(ex_id).map(|name| (name.clone(), *count)))
-                    .collect();
-
-                if current_exercises.is_empty() {
-                    None
-                } else {
-                    // Get known exercises for context
-                    let known_exercises: Vec<String> = exercise_map.values().cloned().collect();
-                    let ctx = crate::llm::PromptContext {
-                        known_exercises,
-                        ..Default::default()
-                    };
-                    let builder = crate::llm::PromptBuilder::new(ctx);
-
-                    // Generate summary using LLM
-                    match crate::llm::generate_workout_summary(
-                        self.llm_backend.as_ref(),
-                        &builder,
-                        &current_exercises,
-                    )
-                    .await
-                    {
-                        Ok(summary) => Some(summary),
-                        Err(e) => {
-                            warn!("Failed to generate workout summary: {}", e);
-                            None
-                        }
-                    }
-                }
-            };
-            
-            complete_workout_session(&self.db_pool, workout_id, duration_seconds, final_intention).await?;
+            complete_workout_session(&self.db_pool, workout_id, duration_seconds).await?;
             *self.workout_id.lock().await = None;
             Ok(())
         } else {
@@ -593,6 +548,16 @@ impl Session {
     }
 
     pub async fn add_set_from_string(&self, request_string: &str) -> Result<()> {
+        let workout_id = self.get_workout_id().await;
+        let current_summary = if let Some(id) = workout_id {
+            get_workout_session(&self.db_pool, id)
+                .await
+                .ok()
+                .and_then(|w| w.summary)
+        } else {
+            None
+        };
+        
         let known_exercises: Vec<String> = self
             .get_all_exercises()
             .await?
@@ -601,6 +566,7 @@ impl Session {
             .collect();
         let ctx = crate::llm::PromptContext {
             known_exercises,
+            current_summary,
             ..Default::default()
         };
         let builder = crate::llm::PromptBuilder::new(ctx);
@@ -616,35 +582,48 @@ impl Session {
             return Ok("No active workout session.".to_string());
         };
 
-        // Get current workout
         let workout = get_workout_session(&self.db_pool, workout_id).await?;
 
-        // Get all sets for current workout
         let sets = get_sets_for_session(&self.db_pool, workout_id).await?;
 
-        // Get all exercises
         let exercises = self.get_all_exercises().await?;
         let exercise_map: std::collections::HashMap<i64, String> =
             exercises.iter().map(|e| (e.id, e.name.clone())).collect();
 
-        // Sort sets by creation time (most recent first)
         let mut sorted_sets = sets.clone();
         sorted_sets.sort_by_key(|s| std::cmp::Reverse(s.created_at));
 
-        // Build context string
         let mut context = String::new();
 
-        // Current workout info
         context.push_str(&format!(
             "Current Workout: ID={}, Name={:?}\n",
             workout.id, workout.name
         ));
-        if let Some(ref intention) = workout.intention {
-            context.push_str(&format!("Intention: {}\n", intention));
+
+        if let Some(summary_json) = &workout.summary {
+            if let Ok(summary_value) =
+                serde_json::from_str::<serde_json::Value>(summary_json)
+            {
+                let message = summary_value
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let emoji = summary_value
+                    .get("emoji")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                context.push_str(&format!(
+                    "Cached Summary → message: \"{}\" | emoji: {}\n",
+                    message, emoji
+                ));
+            } else {
+                context.push_str("Cached Summary → (invalid JSON)\n");
+            }
+        } else {
+            context.push_str("Cached Summary → (none)\n");
         }
         context.push_str("\n");
 
-        // Recent sets (last 10, most recent first)
         context.push_str("=== RECENT SETS (Most Recent First) ===\n");
         for (idx, set) in sorted_sets.iter().take(10).enumerate() {
             let exercise_name = exercise_map
@@ -668,7 +647,6 @@ impl Session {
         }
         context.push_str("\n");
 
-        // All sets in workout (for reference)
         context.push_str("=== ALL SETS IN CURRENT WORKOUT ===\n");
         for set in &sets {
             let exercise_name = exercise_map
@@ -686,7 +664,6 @@ impl Session {
         }
         context.push_str("\n");
 
-        // Recent performance history per exercise (past 10 sets per exercise from all workouts)
         context.push_str("=== RECENT PERFORMANCE HISTORY (Past 10 sets per exercise) ===\n");
         let exercise_ids: std::collections::HashSet<i64> =
             sets.iter().map(|s| s.exercise_id).collect();
@@ -722,11 +699,9 @@ impl Session {
     ) -> Option<i64> {
         let desc_lower = description.to_lowercase();
 
-        // Sort sets by creation time (most recent first)
         let mut sorted_sets = sets.to_vec();
         sorted_sets.sort_by_key(|s| std::cmp::Reverse(s.created_at));
 
-        // Try to match description
         if desc_lower.contains("most recent") || desc_lower.contains("last") || desc_lower == "that"
         {
             return sorted_sets.first().map(|s| s.id);
@@ -736,11 +711,9 @@ impl Session {
             return sorted_sets.get(1).map(|s| s.id);
         }
 
-        // Try to match by exercise name and position
         for exercise_name in exercise_map.values() {
             let ex_lower = exercise_name.to_lowercase();
             if desc_lower.contains(&ex_lower) {
-                // Find sets for this exercise
                 let exercise_sets: Vec<_> = sorted_sets
                     .iter()
                     .filter(|s| {
@@ -755,7 +728,6 @@ impl Session {
                     return exercise_sets.first().map(|s| s.id);
                 }
 
-                // Try to match set index
                 if let Some(idx_str) = desc_lower
                     .split_whitespace()
                     .find(|s| s.parse::<usize>().is_ok())
@@ -769,7 +741,6 @@ impl Session {
             }
         }
 
-        // Try to match by set index number
         if let Some(idx_str) = desc_lower
             .split_whitespace()
             .find(|s| s.parse::<usize>().is_ok())
@@ -790,23 +761,19 @@ impl Session {
             return Err(anyhow::anyhow!("No active workout session"));
         }
 
-        // Build workout context
+        let exercises = self.get_all_exercises().await?;
+        let exercise_map: std::collections::HashMap<i64, String> =
+            exercises.iter().map(|e| (e.id, e.name.clone())).collect();
+        let known_exercises: Vec<String> = exercises.iter().map(|e| e.name.clone()).collect();
+
         let workout_context = self.build_workout_context_string().await?;
 
-        // Get known exercises for prompt context
-        let known_exercises: Vec<String> = self
-            .get_all_exercises()
-            .await?
-            .into_iter()
-            .map(|exercise| exercise.name)
-            .collect();
         let ctx = crate::llm::PromptContext {
             known_exercises,
             ..Default::default()
         };
         let builder = crate::llm::PromptBuilder::new(ctx);
 
-        // Classify input into commands using the fast model
         let commands = crate::llm::classify_commands(
             self.llm_backend.as_ref(),
             &builder,
@@ -820,23 +787,16 @@ impl Session {
             return Ok(());
         }
 
-        // Get current sets and exercise map for set_id resolution
         let sets = self.get_all_sets().await?;
-        let exercises = self.get_all_exercises().await?;
-        let exercise_map: std::collections::HashMap<i64, String> =
-            exercises.iter().map(|e| (e.id, e.name.clone())).collect();
 
-        // Execute commands concurrently
         let mut tasks = Vec::new();
         for command in commands {
             let task = self.execute_command(command, &sets, &exercise_map);
             tasks.push(task);
         }
 
-        // Collect results
         let results: Vec<Result<()>> = future::join_all(tasks).await;
 
-        // Check for errors
         let mut errors = Vec::new();
         for (idx, result) in results.into_iter().enumerate() {
             if let Err(e) = result {
@@ -876,7 +836,6 @@ impl Session {
                 aoi: _,
                 original_string,
             } => {
-                // Convert to ParsedSet
                 let parsed = ParsedSet {
                     exercise,
                     weight: weight.map(|w| w as f32),
@@ -927,7 +886,6 @@ impl Session {
                 };
 
                 if let Some(id) = resolved_id {
-                    // Resolve exercise_id if exercise name is provided
                     let exercise_id = if let Some(exercise_name) = exercise {
                         let ex = get_or_create_exercise(&self.db_pool, &exercise_name).await?;
                         Some(ex.id)
@@ -935,7 +893,6 @@ impl Session {
                         None
                     };
 
-                    // Build update
                     let update = crate::db::models::UpdateWorkoutSet {
                         session_id: None,
                         exercise_id,
@@ -954,21 +911,22 @@ impl Session {
                     ))
                 }
             }
-            crate::llm::Command::ChangeIntention { intention } => {
-                let intention_opt = if intention.trim().is_empty() {
-                    None
-                } else {
-                    Some(intention.trim().to_string())
-                };
-                debug!(
-                    "Intention is {}",
-                    intention_opt.as_ref().unwrap_or(&"None".to_string())
-                );
-                self.set_workout_intention(intention_opt).await
+            crate::llm::Command::UpdateSummary { message, emoji } => {
+                let session_id = self
+                    .get_workout_id()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("No active workout in session"))?;
+                
+                let summary_json = serde_json::json!({
+                    "message": message.trim(),
+                    "emoji": emoji.trim()
+                });
+                
+                update_workout_summary(&self.db_pool, session_id, summary_json.to_string()).await?;
+                Ok(())
             }
             crate::llm::Command::Unknown { input } => {
                 warn!("Unknown command for input: {}", input);
-                // Fallback: try to treat as add_set
                 self.add_set_from_string(&input).await
             }
         }
@@ -991,9 +949,6 @@ impl Session {
             )
         };
 
-        // Use a transaction - operations need to be updated to accept transactions
-        // For now, execute operations sequentially on the pool
-        // TODO: Update operations to accept Executor trait for transaction support
         let exercise_name = parsed.exercise.clone();
         let exercise = get_or_create_exercise(&self.db_pool, &exercise_name).await?;
 
@@ -1034,43 +989,30 @@ impl Session {
         Ok(())
     }
 
-    pub async fn set_workout_intention(&self, intention: Option<String>) -> Result<()> {
-        let session_id = self
-            .get_workout_id()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("No active workout in session"))?;
-        update_workout_intention(&self.db_pool, session_id, intention).await
-    }
-
     pub async fn get_workout_suggestions(&self) -> Result<Vec<crate::llm::WorkoutSuggestion>> {
         let session_id = self
             .get_workout_id()
             .await
             .ok_or_else(|| anyhow::anyhow!("No active workout in session"))?;
 
-        // Get current workout data
         let sets = get_sets_for_session(&self.db_pool, session_id).await?;
         let workout = get_workout_session(&self.db_pool, session_id).await?;
 
-        // Group sets by exercise
         let mut exercise_counts: std::collections::HashMap<i64, i64> =
             std::collections::HashMap::new();
         for set in &sets {
             *exercise_counts.entry(set.exercise_id).or_insert(0) += 1;
         }
 
-        // Get exercise names
         let all_exercises = self.get_all_exercises().await?;
         let exercise_map: std::collections::HashMap<i64, String> =
             all_exercises.into_iter().map(|e| (e.id, e.name)).collect();
 
-        // Build current exercises list
         let current_exercises: Vec<(String, i64)> = exercise_counts
             .iter()
             .filter_map(|(ex_id, count)| exercise_map.get(ex_id).map(|name| (name.clone(), *count)))
             .collect();
 
-        // Build past performance summary
         let mut past_performance_parts = Vec::new();
         for (ex_id, count) in &exercise_counts {
             if let Some(ex_name) = exercise_map.get(ex_id) {
@@ -1099,7 +1041,6 @@ impl Session {
             past_performance_parts.join("\n")
         };
 
-        // Get known exercises for context
         let known_exercises: Vec<String> = exercise_map.values().cloned().collect();
         let ctx = crate::llm::PromptContext {
             known_exercises,
@@ -1107,68 +1048,92 @@ impl Session {
         };
         let builder = crate::llm::PromptBuilder::new(ctx);
 
-        // Generate suggestions using LLM
         crate::llm::generate_workout_suggestions(
             self.llm_backend.as_ref(),
             &builder,
             &current_exercises,
-            workout.intention.as_deref(),
             &past_performance,
         )
         .await
     }
 
-    pub async fn get_workout_summary(&self, force_regenerate: bool) -> Result<String> {
+    pub async fn get_workout_summary(&self) -> Result<WorkoutSummary> {
         let session_id = self
             .get_workout_id()
             .await
             .ok_or_else(|| anyhow::anyhow!("No active workout in session"))?;
 
-        // Check if workout has a user-specified intention
         let workout = get_workout_session(&self.db_pool, session_id).await?;
-        
-        // If there's an intention, use it (whether user-specified or cached LLM summary)
-        // We can't distinguish between user-specified and LLM-generated, so we'll
-        // only regenerate if force_regenerate is true AND intention is empty
-        if let Some(ref intention) = workout.intention {
-            if !intention.is_empty() {
-                if !force_regenerate {
-                    // Not forcing regenerate, return cached intention/summary
-                    return Ok(intention.clone());
+        if let Some(cached_summary) = workout.summary {
+            if let Ok(summary_json) = serde_json::from_str::<serde_json::Value>(&cached_summary) {
+                if let (Some(message), Some(emoji)) = (
+                    summary_json.get("message").and_then(|v| v.as_str()),
+                    summary_json.get("emoji").and_then(|v| v.as_str()),
+                ) {
+                    return Ok(WorkoutSummary {
+                        message: message.to_string(),
+                        emoji: emoji.to_string(),
+                    });
                 }
-                // Force regenerate requested, but there's an intention
-                // Assume it's user-specified and don't overwrite it
-                return Ok(intention.clone());
             }
         }
 
-        // No user-specified intention, generate a new summary
-        // Get current workout data
         let sets = get_sets_for_session(&self.db_pool, session_id).await?;
 
-        // Group sets by exercise
         let mut exercise_counts: std::collections::HashMap<i64, i64> =
             std::collections::HashMap::new();
         for set in &sets {
             *exercise_counts.entry(set.exercise_id).or_insert(0) += 1;
         }
 
-        // Get exercise names
         let all_exercises = self.get_all_exercises().await?;
         let exercise_map: std::collections::HashMap<i64, String> =
             all_exercises.into_iter().map(|e| (e.id, e.name)).collect();
 
-        // Build current exercises list
+        let mut exercise_details = Vec::new();
+        for (ex_id, count) in &exercise_counts {
+            if let Some(ex_name) = exercise_map.get(ex_id) {
+                let exercise_sets: Vec<_> = sets
+                    .iter()
+                    .filter(|s| s.exercise_id == *ex_id)
+                    .collect();
+                
+                if !exercise_sets.is_empty() {
+                    let avg_weight = exercise_sets.iter().map(|s| s.weight).sum::<f64>() / exercise_sets.len() as f64;
+                    let avg_reps = exercise_sets.iter().map(|s| s.reps).sum::<i64>() as f64 / exercise_sets.len() as f64;
+                    let avg_rpe = exercise_sets
+                        .iter()
+                        .filter_map(|s| s.rpe)
+                        .collect::<Vec<_>>();
+                    let avg_rpe_str = if !avg_rpe.is_empty() {
+                        let rpe_avg = avg_rpe.iter().sum::<f64>() / avg_rpe.len() as f64;
+                        format!(" @{:.1}RPE", rpe_avg)
+                    } else {
+                        String::new()
+                    };
+                    
+                    exercise_details.push(format!(
+                        "{}: {} sets, avg {:.1}kg x {:.0} reps{}",
+                        ex_name, count, avg_weight, avg_reps, avg_rpe_str
+                    ));
+                } else {
+                    exercise_details.push(format!("{}: {} sets", ex_name, count));
+                }
+            }
+        }
+        
         let current_exercises: Vec<(String, i64)> = exercise_counts
             .iter()
             .filter_map(|(ex_id, count)| exercise_map.get(ex_id).map(|name| (name.clone(), *count)))
             .collect();
 
         if current_exercises.is_empty() {
-            return Ok("No exercises added yet.".to_string());
+            return Ok(WorkoutSummary {
+                message: "No exercises added yet.".to_string(),
+                emoji: "✨".to_string(),
+            });
         }
 
-        // Get known exercises for context
         let known_exercises: Vec<String> = exercise_map.values().cloned().collect();
         let ctx = crate::llm::PromptContext {
             known_exercises,
@@ -1176,16 +1141,32 @@ impl Session {
         };
         let builder = crate::llm::PromptBuilder::new(ctx);
 
-        // Generate summary using LLM
+        let detailed_exercises: Vec<(String, i64, String)> = exercise_counts
+            .iter()
+            .filter_map(|(ex_id, count)| {
+                exercise_map.get(ex_id).map(|name| {
+                    let detail = exercise_details.iter()
+                        .find(|d| d.starts_with(name))
+                        .map(|d| d.clone())
+                        .unwrap_or_else(|| format!("{}: {} sets", name, count));
+                    (name.clone(), *count, detail)
+                })
+            })
+            .collect();
+
         let summary = crate::llm::generate_workout_summary(
             self.llm_backend.as_ref(),
             &builder,
             &current_exercises,
+            &detailed_exercises,
         )
         .await?;
 
-        // Cache the summary in the database
-        update_workout_intention(&self.db_pool, session_id, Some(summary.clone())).await?;
+        let summary_json = serde_json::json!({
+            "message": summary.message.trim(),
+            "emoji": summary.emoji.trim()
+        });
+        update_workout_summary(&self.db_pool, session_id, summary_json.to_string()).await?;
 
         Ok(summary)
     }

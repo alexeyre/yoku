@@ -61,3 +61,50 @@ extension String {
     }
 }
 
+final class GlowSystem: ObservableObject {
+    @Published private(set) var activeEvents: [GlowEvent] = []
+
+    func register(_ event: GlowEvent) {
+        guard activeEvents.firstIndex(where: { $0.id == event.id }) == nil else {
+            return
+        }
+
+        activeEvents.append(event)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + event.duration) { [weak self] in
+            self?.remove(event)
+        }
+    }
+
+    func isActive(target: GlowTarget) -> Bool {
+        activeEvents.contains { $0.matches(target) }
+    }
+
+    private func remove(_ event: GlowEvent) {
+        if let index = activeEvents.firstIndex(where: { $0.id == event.id }) {
+            activeEvents.remove(at: index)
+        }
+    }
+}
+
+private struct GlowTargetModifier: ViewModifier {
+    @EnvironmentObject private var glowSystem: GlowSystem
+    let target: GlowTarget
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        content.localGlowEffect(
+            isActive: Binding(
+                get: { glowSystem.isActive(target: target) },
+                set: { _ in }
+            ),
+            cornerRadius: cornerRadius
+        )
+    }
+}
+
+extension View {
+    func glow(for target: GlowTarget, cornerRadius: CGFloat = 8) -> some View {
+        modifier(GlowTargetModifier(target: target, cornerRadius: cornerRadius))
+    }
+}

@@ -29,3 +29,4 @@ yoku-core/YokuUniffi
 .DS_Store
 
 .sqlx/
+dev.db

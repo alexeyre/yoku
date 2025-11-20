@@ -86,7 +86,6 @@ async fn main() -> Result<()> {
     dotenv().ok();
     let cli = Cli::parse();
 
-    // Initialize LLM parser if needed by a command that uses it.
     let parser: Option<LlmInterface> = match cli.command {
         Commands::AddSet { .. } | Commands::SuggestExerciseLinks { .. } => {
             let llm = match cli.parser {
@@ -193,7 +192,6 @@ async fn cmd_add_set(session_id: &i64, input: &str, parser: LlmInterface) -> Res
     };
     let builder = yoku_core::llm::PromptBuilder::new(ctx);
 
-    // Parse the input using the selected LLM backend and prompt builder
     let parsed: ParsedSet = yoku_core::llm::parse_set_string(&parser, &builder, input).await?;
 
     // Let the session handle adding the set (it will create/get exercises as needed)
