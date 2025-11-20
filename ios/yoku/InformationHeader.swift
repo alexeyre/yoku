@@ -107,6 +107,7 @@ struct InformationHeader: View {
                     Spacer()
 
                     Button {
+                        workoutState.nextSet()
                     } label: {
                         Text("[ NEXT ]")
                             .font(.appButton)
@@ -161,7 +162,7 @@ struct InformationHeader: View {
                 Text(value)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .animation(.easeInOut(duration: 0.2), value: value)
+                    //.animation(.easeInOut(duration: 0.2), value: value)
                 Text(label)
                     .opacity(0.7)
             } else {
@@ -170,7 +171,7 @@ struct InformationHeader: View {
                 Text(value)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .animation(.easeInOut(duration: 0.2), value: value)
+                    //.animation(.easeInOut(duration: 0.2), value: value)
             }
         }
     }

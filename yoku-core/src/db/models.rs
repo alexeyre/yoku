@@ -1,5 +1,5 @@
-use std::fmt;
 use sqlx::FromRow;
+use std::fmt;
 
 #[derive(Debug, Clone, FromRow)]
 pub struct Muscle {
@@ -78,8 +78,8 @@ pub struct WorkoutSession {
     pub date: String,
     pub duration_seconds: i64,
     pub notes: Option<String>,
-    pub intention: Option<String>,
     pub status: String,
+    pub summary: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

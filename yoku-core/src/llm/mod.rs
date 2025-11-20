@@ -364,6 +364,7 @@ pub struct PromptContext {
     pub max_example_chars: usize,
     pub selected_set_backend_id: Option<i64>,
     pub visible_set_backend_ids: Vec<i64>,
+    pub current_summary: Option<String>,
 }
 
 impl Default for PromptContext {
@@ -379,6 +380,7 @@ impl Default for PromptContext {
             max_example_chars: 1500,
             selected_set_backend_id: None,
             visible_set_backend_ids: vec![],
+            current_summary: None,
         }
     }
 }
@@ -395,10 +397,11 @@ pub struct PromptBuilder {
 impl PromptBuilder {
     pub fn new(ctx: PromptContext) -> Self {
         debug!(
-            "PromptBuilder::new created with known_exercises={} known_equipment={} known_muscles={}",
+            "PromptBuilder::new created with known_exercises={} known_equipment={} known_muscles={} has_summary={}",
             ctx.known_exercises.len(),
             ctx.known_equipment.len(),
-            ctx.known_muscles.len()
+            ctx.known_muscles.len(),
+            ctx.current_summary.is_some()
         );
         Self { ctx }
     }
@@ -531,7 +534,6 @@ impl PromptBuilder {
             format!("Known exercises: {}\n", self.ctx.known_exercises.join(", "))
         };
         let ex_block = self.examples_block_for_exercise_links();
-        // Example output schema now expects muscles as arrays: [["Biceps","primary",0.9], ["Triceps","secondary",0.4]]
         let base = format!(
             "Exercise: {}\n{}{}{}Return JSON like: {{\"equipment\": [\"...\"], \"muscles\": [[\"Muscle Name\",\"relation_type\",strength], ...], \"related_exercises\": [\"...\", ...]}}",
             exercise, known_eq, known_m, known_ex
@@ -564,8 +566,7 @@ Command types:
    - If user says "no that should be 80kg" referring to most recent set, use description or set_id from recent sets
    - If user says "this set" and a currently selected set ID is provided in context, use that set_id
 
-4. "change_intention" - Change workout intention/goal. Fields: intention (string)
-   - Extract the intention from natural language
+4. "update_summary" - Refresh the workout summary when the current summary (provided in context) no longer reflects the workout, when the user explicitly asks for a new summary, or when major exercise changes occur. Fields: message (string, <= 30 characters, no ending period), emoji (string, single emoji character or empty string if unsure). Always trim whitespace.
 
 5. "unknown" - Fallback for unclassifiable input. Fields: input (string)
 
@@ -574,6 +575,7 @@ Examples:
 - "remove the last 2 sets" → [{"command_type": "remove_set", "set_id": null, "description": "last set"}, {"command_type": "remove_set", "set_id": null, "description": "second to last set"}]
 - "change last bench press to 105kg" → [{"command_type": "edit_set", "set_id": null, "description": "last bench press set", "weight": 105.0, "exercise": null, "reps": null, "rpe": null}]
 - "no that should be 80kg" → [{"command_type": "edit_set", "set_id": null, "description": "most recent set", "weight": 80.0, ...}]
+- "rewrite the summary to highlight today's push focus 🔥" → [{"command_type": "update_summary", "message": "Push power finisher", "emoji": "🔥"}]
 
 Return only valid JSON: {"commands": [...]}"#.to_string()
     }
@@ -581,7 +583,6 @@ Return only valid JSON: {"commands": [...]}"#.to_string()
     pub fn user_input_classification_prompt(&self, input: &str, workout_context: &str) -> String {
         let mut context_parts = vec![format!("User input: \"{}\"", input)];
 
-        // Add set context information
         if let Some(selected_id) = self.ctx.selected_set_backend_id {
             context_parts.push(format!(
                 "Currently selected set ID: {} (when user says 'this set', they mean set ID {})",
@@ -601,6 +602,16 @@ Return only valid JSON: {"commands": [...]}"#.to_string()
                 "Visible set IDs: [{}] (when user says 'all the sets I can see' or similar, they mean these set IDs)",
                 visible_ids_str
             ));
+        }
+
+        if let Some(summary) = &self.ctx.current_summary {
+            context_parts.push(format!(
+                "Existing workout summary JSON (message + emoji): {}",
+                summary
+            ));
+            context_parts.push("If the workout details above diverge from this summary or the user explicitly asks for a new summary, include an \"update_summary\" command with refreshed text and emoji.".to_string());
+        } else {
+            context_parts.push("Current summary: (none cached) — prefer adding an \"update_summary\" command once enough context exists to describe the workout.".to_string());
         }
 
         context_parts.push(format!("Workout Context:\n{}", workout_context));
@@ -646,7 +657,6 @@ GUIDELINES:
 - For completion suggestions: Use when workout is already very taxing (high volume, high intensity, or user seems fatigued)
 - For volume suggestions: Specify exactly how many sets/reps to add
 - Base all suggestions on the actual past performance data provided
-- Consider workout intention if provided
 - Balance muscle groups appropriately
 
 Return only valid JSON."#.to_string()
@@ -654,65 +664,99 @@ Return only valid JSON."#.to_string()
 
     pub fn user_suggestion_prompt(
         &self,
-        current_exercises: &[(String, i64)], // (exercise_name, set_count)
-        intention: Option<&str>,
-        past_performance: &str, // Summary of past performance
+        current_exercises: &[(String, i64)], 
+        past_performance: &str,              
     ) -> String {
         let exercises_list: String = current_exercises
             .iter()
             .map(|(name, count)| format!("- {} ({} sets)", name, count))
             .collect::<Vec<_>>()
             .join("\n");
-
-        let intention_section = if let Some(intent) = intention {
-            format!("\nWorkout Intention: {}\n", intent)
-        } else {
-            String::new()
-        };
 
         let total_sets: i64 = current_exercises.iter().map(|(_, count)| count).sum();
         let workout_intensity_note = if total_sets > 15 {
             "\nNOTE: This workout already has significant volume. Consider whether to suggest completion or lighter accessory work.\n"
         } else if current_exercises.is_empty() {
-            "\nNOTE: Workout just starting. Focus on exercise recommendations based on intention.\n"
+            "\nNOTE: Workout just starting. Focus on exercise recommendations.\n"
         } else {
             "\nNOTE: Room for more work. Consider progression on current exercises or adding complementary exercises.\n"
         };
 
         format!(
-            "Current workout:\n{}\n{}Past Performance Summary:\n{}\n{}\nProvide 3-5 SPECIFIC, ACTIONABLE suggestions. For each suggestion:\n\n1. EXERCISE RECOMMENDATIONS: If suggesting a new exercise, specify the exact exercise name, rep range, and RPE (e.g., \"Add Barbell Rows: 3 sets of 8-10 reps @7-8 RPE\")\n\n2. PROGRESSION SUGGESTIONS: If suggesting progression on an existing exercise, specify:\n   - Exact weight change (e.g., \"Increase Bench Press from 85kg to 87.5kg\")\n   - Rep range (e.g., \"Try 4-5 reps @8 RPE\")\n   - Base this on the past performance data provided\n\n3. COMPLETION SUGGESTIONS: If the workout is already very taxing (high volume, high intensity, or user appears fatigued), suggest wrapping up with a completion-type suggestion\n\n4. VOLUME SUGGESTIONS: If suggesting more volume, specify exactly how many sets/reps to add (e.g., \"Add 1 more set to Squats at 90% working weight\")\n\nBase all suggestions on the actual past performance data. Be specific with weights, reps, and RPE ranges. Avoid vague advice.\n\nReturn JSON with a 'suggestions' array.",
-            exercises_list, intention_section, past_performance, workout_intensity_note
+            "Current workout:\n{}\nPast Performance Summary:\n{}\n{}\nProvide 3-5 SPECIFIC, ACTIONABLE suggestions. For each suggestion:\n\n1. EXERCISE RECOMMENDATIONS: If suggesting a new exercise, specify the exact exercise name, rep range, and RPE (e.g., \"Add Barbell Rows: 3 sets of 8-10 reps @7-8 RPE\")\n\n2. PROGRESSION SUGGESTIONS: If suggesting progression on an existing exercise, specify:\n   - Exact weight change (e.g., \"Increase Bench Press from 85kg to 87.5kg\")\n   - Rep range (e.g., \"Try 4-5 reps @8 RPE\")\n   - Base this on the past performance data provided\n\n3. COMPLETION SUGGESTIONS: If the workout is already very taxing (high volume, high intensity, or user appears fatigued), suggest wrapping up with a completion-type suggestion\n\n4. VOLUME SUGGESTIONS: If suggesting more volume, specify exactly how many sets/reps to add (e.g., \"Add 1 more set to Squats at 90% working weight\")\n\nBase all suggestions on the actual past performance data. Be specific with weights, reps, and RPE ranges. Avoid vague advice.\n\nReturn JSON with a 'suggestions' array.",
+            exercises_list, past_performance, workout_intensity_note
         )
     }
 
     pub fn system_summary_prompt(&self) -> String {
-        r#"You are an expert fitness coach. Generate a brief, concise summary of the current workout based on the exercises and sets performed.
+        r#"You are an expert fitness coach. Analyze the workout data and generate a brief, insightful summary that captures the workout's character, intensity, and focus.
 
-The summary should be:
-- Brief (1-2 sentences, max 100 characters)
-- Descriptive of the workout focus (e.g., "Upper body strength session", "Full body compound movements", "Push-focused hypertrophy")
-- Natural and readable
+Output ONLY valid JSON with the following shape:
+{
+  "message": "A natural-language summary (1 short sentence, max 30 characters, no full-stop at the end)",
+  "emoji": "A single emoji that best represents the workout vibe"
+}
 
-Return only a plain text string, no JSON, no quotes, just the summary text."#.to_string()
+Guidelines:
+- Analyze patterns: Look at weights, reps, RPE, volume, and exercise selection to identify the workout's intent
+- Be insightful: Don't just list exercises. Identify themes like "Heavy strength focus", "High volume pump", "Power building", "Volume accumulation", "Intensity peaking"
+- Consider intensity: High RPE (8-10) = intensity focus. Low RPE (6-7) = volume focus. Mixed = balanced approach
+- Consider volume: Many sets = volume work. Few heavy sets = strength focus
+- Consider exercise types: Compound movements = strength/power. Isolation = hypertrophy. Mixed = balanced
+- "message" should capture the workout's essence, not just describe what's there (e.g., "Heavy strength focus", "Volume accumulation", "Power building", "High intensity push")
+- "emoji" should match the vibe: 💪 (strength), 🔥 (intensity), ⚡ (power), 📈 (volume), 🎯 (focused), etc.
+- If the workout data is empty, respond with {"message": "No exercises added yet.", "emoji": ""}
+
+Return ONLY the JSON object."#.to_string()
     }
 
     pub fn user_summary_prompt(
         &self,
-        current_exercises: &[(String, i64)], // (exercise_name, set_count)
+        current_exercises: &[(String, i64)], 
+        detailed_exercises: &[(String, i64, String)], 
     ) -> String {
         if current_exercises.is_empty() {
             return "No exercises added yet.".to_string();
         }
 
-        let exercises_list: String = current_exercises
+        let total_sets: i64 = current_exercises.iter().map(|(_, count)| count).sum();
+        let exercise_count = current_exercises.len();
+        
+        let exercises_list: String = detailed_exercises
             .iter()
-            .map(|(name, count)| format!("- {} ({} sets)", name, count))
+            .map(|(_, _, detail)| format!("- {}", detail))
             .collect::<Vec<_>>()
             .join("\n");
 
+        let has_rpe = detailed_exercises.iter().any(|(_, _, detail)| detail.contains("RPE"));
+        let high_rpe_count = detailed_exercises.iter()
+            .filter(|(_, _, detail)| {
+                if let Some(rpe_start) = detail.find("@") {
+                    if let Some(rpe_end) = detail[rpe_start+1..].find("RPE") {
+                        if let Ok(rpe) = detail[rpe_start+1..rpe_start+1+rpe_end].trim().parse::<f64>() {
+                            return rpe >= 8.0;
+                        }
+                    }
+                }
+                false
+            })
+            .count();
+
+        let intensity_note = if has_rpe {
+            if high_rpe_count > exercise_count / 2 {
+                "High intensity focus (RPE 8+ on most exercises)"
+            } else if high_rpe_count > 0 {
+                "Mixed intensity (some high RPE work)"
+            } else {
+                "Volume focus (lower RPE work)"
+            }
+        } else {
+            "No RPE data available"
+        };
+
         format!(
-            "Current workout exercises:\n{}\n\nGenerate a brief summary of this workout.",
-            exercises_list
+            "Workout Analysis:\n\nExercises performed:\n{}\n\nTotal: {} exercises, {} sets\nIntensity: {}\n\nAnalyze the workout pattern:\n- Exercise selection (compound vs isolation, movement patterns)\n- Volume (total sets: {} - indicates volume focus if >15, strength focus if <8)\n- Intensity (RPE patterns indicate training intent)\n- Exercise count (focused if 1-3, comprehensive if 4+)\n- Weight/rep ranges (heavy/low reps = strength, moderate = hypertrophy, light/high = endurance)\n\nGenerate an insightful summary that captures the workout's character, intensity focus, and training intent. Don't just list exercises - identify the underlying training pattern (e.g., 'Heavy strength focus', 'Volume accumulation', 'Power building', 'High intensity push').",
+            exercises_list, exercise_count, total_sets, intensity_note, total_sets
         )
     }
 }
@@ -784,22 +828,15 @@ pub async fn generate_exercise_to_equipment_and_muscles(
 pub struct WorkoutSuggestion {
     pub title: String,
     pub subtitle: Option<String>,
-    pub suggestion_type: String, // "exercise", "progression", "volume", "accessory"
+    pub suggestion_type: String, 
     pub exercise_name: Option<String>,
     pub reasoning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum InputType {
-    #[serde(rename = "intention")]
-    Intention,
-    #[serde(rename = "set")]
-    Set,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InputClassification {
-    pub input_type: InputType,
+pub struct WorkoutSummary {
+    pub message: String,
+    pub emoji: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -830,8 +867,11 @@ pub enum Command {
         reps: Option<i64>,
         rpe: Option<f64>,
     },
-    #[serde(rename = "change_intention")]
-    ChangeIntention { intention: String },
+    #[serde(rename = "update_summary")]
+    UpdateSummary {
+        message: String,
+        emoji: String,
+    },
     #[serde(rename = "unknown")]
     Unknown { input: String },
 }
@@ -839,22 +879,6 @@ pub enum Command {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandList {
     pub commands: Vec<Command>,
-}
-
-pub async fn classify_input_type(
-    llm: &LlmInterface,
-    builder: &PromptBuilder,
-    input: &str,
-) -> Result<InputType> {
-    debug!("classify_input_type called input_len={}", input.len());
-    let system = builder.system_input_classification_prompt();
-    let user = builder.user_input_classification_prompt(input, "");
-    let classification: InputClassification = llm.call_json(&system, &user).await?;
-    info!(
-        "classify_input_type classified as {:?}",
-        classification.input_type
-    );
-    Ok(classification.input_type)
 }
 
 pub async fn classify_commands(
@@ -885,16 +909,14 @@ pub async fn generate_workout_suggestions(
     llm: &LlmInterface,
     builder: &PromptBuilder,
     current_exercises: &[(String, i64)],
-    intention: Option<&str>,
     past_performance: &str,
 ) -> Result<Vec<WorkoutSuggestion>> {
     debug!(
-        "generate_workout_suggestions called exercises={} intention={:?}",
-        current_exercises.len(),
-        intention
+        "generate_workout_suggestions called exercises={}",
+        current_exercises.len()
     );
     let system = builder.system_suggestion_prompt();
-    let user = builder.user_suggestion_prompt(current_exercises, intention, past_performance);
+    let user = builder.user_suggestion_prompt(current_exercises, past_performance);
 
     #[derive(Deserialize)]
     struct ResShape {
@@ -913,19 +935,26 @@ pub async fn generate_workout_summary(
     llm: &LlmInterface,
     builder: &PromptBuilder,
     current_exercises: &[(String, i64)],
-) -> Result<String> {
+    detailed_exercises: &[(String, i64, String)],
+) -> Result<WorkoutSummary> {
     debug!(
         "generate_workout_summary called exercises={}",
         current_exercises.len()
     );
     let system = builder.system_summary_prompt();
-    let user = builder.user_summary_prompt(current_exercises);
+    let user = builder.user_summary_prompt(current_exercises, detailed_exercises);
 
-    // For summary, we want plain text, not JSON
-    let summary = llm.call(&system, &user).await?;
-    let summary = summary.trim().to_string();
-    
-    info!("generate_workout_summary returned: {}", summary);
+    let mut summary: WorkoutSummary = llm.call_json(&system, &user).await?;
+    summary.message = summary.message.trim().to_string();
+    summary.emoji = summary.emoji.trim().to_string();
+    if summary.emoji.is_empty() {
+        summary.emoji = "✨".to_string();
+    }
+
+    info!(
+        "generate_workout_summary returned message='{}' emoji='{}'",
+        summary.message, summary.emoji
+    );
     Ok(summary)
 }
 

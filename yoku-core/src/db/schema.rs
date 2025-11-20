@@ -1,4 +1,3 @@
-// @generated automatically by Diesel CLI.
 
 diesel::table! {
     exercise_muscles (exercise_id, muscle_id) {

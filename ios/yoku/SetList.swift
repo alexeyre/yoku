@@ -22,7 +22,6 @@ struct SetList: View {
     private let chartHorizontalPadding: CGFloat = 12
     private let chartVerticalPadding: CGFloat = 6
 
-
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
@@ -69,69 +68,127 @@ struct SetList: View {
         @Binding var previousSetCounts: [UUID: Int]
         let availableWidth: CGFloat
         
+        private var exerciseIds: [UUID] {
+            workoutState.exercises.map { $0.id }
+        }
+        
         var body: some View {
-            ForEach(workoutState.exercises) { exercise in
+            Group {
+                ForEach(workoutState.exercises) { exercise in
+                    ExerciseSectionView(
+                        exercise: exercise,
+                        seenSetIDs: $seenSetIDs,
+                        previousSetCounts: $previousSetCounts,
+                        availableWidth: availableWidth
+                    )
+                }
+            }
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: exerciseIds)
+        }
+    }
+
+    // MARK: - Exercise Section View (New subview to help compiler)
+
+    private struct ExerciseSectionView: View {
+        @EnvironmentObject var workoutState: Session
+        let exercise: ExerciseModel
+        @Binding var seenSetIDs: Set<UUID>
+        @Binding var previousSetCounts: [UUID: Int]
+        let availableWidth: CGFloat
+
+        var body: some View {
+            // Hoist optional subscript to reduce inference complexity
+            let prevCount: Int? = previousSetCounts[exercise.id]
+
+            let content = VStack(spacing: 0) {
                 // Exercise row (tappable)
                 ExerciseRowView(
                     exercise: exercise,
-                    previousSetCount: previousSetCounts[exercise.id],
+                    previousSetCount: prevCount,
                     availableWidth: availableWidth
                 )
                 .transition(.opacity.combined(with: .move(edge: .top)))
                 .onAppear {
-                    // Initialize if not set
                     if previousSetCounts[exercise.id] == nil {
                         previousSetCounts[exercise.id] = exercise.sets.count
                     }
                 }
-                .onChange(of: exercise.sets.count) { oldValue, newValue in
-                    // Update previous set count after checking for changes
-                    // The ExerciseRowView will handle triggering the glow
+                .onChange(of: exercise.sets.count) { _, newValue in
                     previousSetCounts[exercise.id] = newValue
                 }
 
-                // Sets (expanded)
+                // Sets (expanded) extracted to its own subview to reduce body complexity
                 if workoutState.isExpanded(exercise) {
-                    ForEach(exercise.sets) { set in
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                workoutState.setActiveExercise(exercise)
-                                workoutState.activeSetID = set.id
-                            }
-                        } label: {
-                            SetInformationView(set: set, availableWidth: availableWidth)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 24)
-                        .padding(.trailing, 12)
-                        .background(
-                            set.id == workoutState.activeSetID
-                            ? Color.accentColor.opacity(0.06)
-                            : Color.clear
-                        )
-                        .animation(.easeInOut(duration: 0.2), value: set.id == workoutState.activeSetID)
-                        .glowOnSetEvent(setID: set.backendID)
-                        .gesture(
-                            DragGesture(minimumDistance: 50)
-                                .onEnded { value in
-                                    if value.translation.width < -100 {
-                                        if let backendID = set.backendID {
-                                            Task {
-                                                try? await workoutState.deleteSet(id: backendID)
-                                            }
-                                        }
-                                    }
-                                }
-                        )
-                        .onAppear {
-                            seenSetIDs.insert(set.id)
-                        }
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
+                    ExerciseSetsList(
+                        exercise: exercise,
+                        seenSetIDs: $seenSetIDs,
+                        availableWidth: availableWidth
+                    )
                 }
             }
-            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: workoutState.exercises.map { $0.id })
+            
+            if let backendID = exercise.backendID {
+                content.glow(for: .exercise(id: backendID), cornerRadius: 12)
+            } else {
+                content
+            }
+        }
+    }
+
+    // MARK: - Extracted sets list
+
+    private struct ExerciseSetsList: View {
+        @EnvironmentObject var workoutState: Session
+        let exercise: ExerciseModel
+        @Binding var seenSetIDs: Set<UUID>
+        let availableWidth: CGFloat
+
+        var body: some View {
+            ForEach(exercise.sets) { set in
+                if let backendID = set.backendID {
+                    makeSetButton(for: set)
+                        .glow(for: .set(id: backendID), cornerRadius: 8)
+                } else {
+                    makeSetButton(for: set)
+                }
+            }
+        }
+
+        private func makeSetButton(for set: ExerciseSetModel) -> some View {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    workoutState.setActiveExercise(exercise)
+                    workoutState.activeSetID = set.id
+                }
+            } label: {
+                SetInformationView(set: set, availableWidth: availableWidth)
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 24)
+            .padding(.trailing, 12)
+            .background(
+                set.id == workoutState.activeSetID
+                ? Color.accentColor.opacity(0.06)
+                : Color.clear
+            )
+            .animation(.easeInOut(duration: 0.2), value: set.id == workoutState.activeSetID)
+            .gesture(
+                DragGesture(minimumDistance: 50)
+                    .onEnded { value in
+                        if value.translation.width < -100 {
+                            if let backendID = set.backendID {
+                                Task {
+                                    try? await workoutState.deleteSet(id: backendID)
+                                }
+                            }
+                        }
+                    }
+            )
+            .onAppear {
+                seenSetIDs.insert(set.id)
+            }
+            .transition(.opacity.combined(with: .move(edge: .top)))
         }
     }
     
@@ -144,6 +201,10 @@ struct SetList: View {
         let availableWidth: CGFloat
         
         var body: some View {
+            baseRow
+        }
+
+        private var baseRow: some View {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     workoutState.setActiveExercise(exercise)
@@ -185,7 +246,6 @@ struct SetList: View {
                 : Color.clear
             )
             .animation(.easeInOut(duration: 0.2), value: exercise.id == workoutState.activeExerciseID)
-            .glowOnExerciseEvent(exerciseID: exercise.backendID)
         }
     }
 
@@ -316,12 +376,12 @@ struct SetList: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .onChange(of: set.weight) { oldValue, newValue in
+            .onChange(of: set.weight) { _, newValue in
                 if abs(Double(weightText) ?? 0 - newValue) > 0.01 {
                     syncStateFromSet()
                 }
             }
-            .onChange(of: set.reps) { oldValue, newValue in
+            .onChange(of: set.reps) { _, newValue in
                 if let textValue = Int64(repsText), textValue != newValue {
                     syncStateFromSet()
                 } else if Int64(repsText) == nil {

@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS workout_sessions (
     date TEXT NOT NULL DEFAULT (DATE('now')),
     duration_seconds INTEGER NOT NULL DEFAULT 0,
     notes TEXT,
+    summary TEXT,
     intention TEXT,
     status TEXT NOT NULL DEFAULT 'in_progress' CHECK(status IN ('in_progress', 'completed')),
     created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),

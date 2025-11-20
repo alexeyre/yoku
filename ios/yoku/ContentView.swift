@@ -3,6 +3,7 @@ import YokuUniffi
 
 struct ContentView: View {
     @EnvironmentObject var session: Session
+    @StateObject private var glowSystem = GlowSystem()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,6 +20,10 @@ struct ContentView: View {
                 .environmentObject(session)
         }
         .environmentObject(session)
+        .environmentObject(glowSystem)
+        .onReceive(session.glowPublisher) {
+            glowSystem.register($0)
+        }
         .onAppear {
             // Auto-start timer if workout exists and timer not already running
             if session.activeWorkoutSession != nil && !session.isTimerRunning && session.workoutStartTime == nil {

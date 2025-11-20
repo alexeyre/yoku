@@ -74,11 +74,11 @@ final class Session: ObservableObject {
     @Published var activeSetID: UUID?
     @Published private(set) var session: YokuUniffi.Session?
     @Published private(set) var activeWorkoutSession: YokuUniffi.WorkoutSession?
+    @Published var workoutSummary: String? = nil
     @Published var elapsedTime: TimeInterval = 0
     @Published var lastError: Error?
     @Published var workoutStartTime: Date?
     @Published var isTimerPaused: Bool = false
-    @Published var intention: String?
 
     // New: lifts map keyed by backend exercise id
     @Published private(set) var liftsByExerciseId: [Int64: [Double]] = [:]
@@ -325,14 +325,17 @@ final class Session: ObservableObject {
         return try? await backend.getInProgressWorkoutSession()
     }
     
-    func getWorkoutSummary(forceRegenerate: Bool = false) async throws -> String {
+    func getWorkoutSummary() async throws -> YokuUniffi.WorkoutSummary {
         guard let session = session else {
             throw SessionError.backendNotInitialized
         }
-        return try await YokuUniffi.getWorkoutSummary(session: session, forceRegenerate: forceRegenerate)
+        return try await YokuUniffi.getWorkoutSummary(session: session)
     }
 
     // MARK: - Accessors
+    
+    func nextSet() {
+    }
 
     var activeExercise: ExerciseModel? {
         guard let id = activeExerciseID else { return nil }
@@ -401,29 +404,78 @@ final class Session: ObservableObject {
     private func apply(snapshot: BackendSessionCoordinator.Snapshot, emitGlowEvents: Bool = true) {
         session = snapshot.session
         activeWorkoutSession = snapshot.workout
+        workoutSummary = snapshot.workout?.summary()
         liftsByExerciseId = snapshot.liftsByExerciseId
         updateExercises(with: snapshot.exercises, sets: snapshot.sets)
-        intention = snapshot.intention
         
         if emitGlowEvents {
+            // 1. Collect all set events per exercise (added or modified)
+            var addedSetIDsByExercise: [Int64: Set<Int64>] = [:]
+            var modifiedSetIDsByExercise: [Int64: Set<Int64>] = [:]
+
             for mod in snapshot.modifications {
-                let target: GlowTarget
+                guard let exId = mod.exerciseId else { continue }
+                
+                if mod.modificationType == .setAdded {
+                    if !mod.setIds.isEmpty {
+                        for sid in mod.setIds {
+                            addedSetIDsByExercise[exId, default: []].insert(sid)
+                        }
+                    } else if let sid = mod.setId {
+                        addedSetIDsByExercise[exId, default: []].insert(sid)
+                    }
+                } else if mod.modificationType == .setModified {
+                    if !mod.setIds.isEmpty {
+                        for sid in mod.setIds {
+                            modifiedSetIDsByExercise[exId, default: []].insert(sid)
+                        }
+                    } else if let sid = mod.setId {
+                        modifiedSetIDsByExercise[exId, default: []].insert(sid)
+                    }
+                }
+            }
+
+            // Helper to process grouped set events
+            func processGroupedEvents(setIDsByExercise: [Int64: Set<Int64>]) {
+                for (exId, setIDs) in setIDsByExercise {
+                    guard let exerciseUUID = exerciseIDMap[exId] else { continue }
+                    let isExpanded = expanded.contains(exerciseUUID)
+
+                    if !isExpanded {
+                        // Minimized: expand and glow whole exercise
+                        expanded.insert(exerciseUUID)
+                        emitGlowEvent(target: .exercise(id: exId))
+                    } else {
+                        if setIDs.count > 1 {
+                            // Multiple sets: glow whole exercise block
+                            emitGlowEvent(target: .exercise(id: exId))
+                        } else if let singleId = setIDs.first {
+                            // Single set: glow just that set
+                            emitGlowEvent(target: .set(id: singleId))
+                        }
+                    }
+                }
+            }
+
+            // 2. Emit grouped events
+            processGroupedEvents(setIDsByExercise: addedSetIDsByExercise)
+            processGroupedEvents(setIDsByExercise: modifiedSetIDsByExercise)
+
+            // 3. Process other modifications (Exercise added/removed, etc.)
+            for mod in snapshot.modifications {
                 switch mod.modificationType {
-                case .setAdded:
-                    if let setId = mod.setId {
-                        target = .set(id: setId)
-                        emitGlowEvent(target: target)
-                    }
                 case .exerciseAdded:
-                    if let exId = mod.exerciseId {
-                        target = .exercise(id: exId)
+                    // New exercise: always glow the whole exercise
+                    if let exId = mod.exerciseId,
+                       let exerciseUUID = exerciseIDMap[exId] {
+                        // Auto-expand new exercises
+                        expanded.insert(exerciseUUID)
+                        let target: GlowTarget = .exercise(id: exId)
                         emitGlowEvent(target: target)
                     }
-                case .setModified:
-                    if let setId = mod.setId {
-                        target = .set(id: setId)
-                        emitGlowEvent(target: target)
-                    }
+                case .setAdded, .setModified:
+                    // Handled in bulk above
+                    continue
                 case .setRemoved:
                     break
                 }
@@ -514,6 +566,7 @@ final class Session: ObservableObject {
         activeExerciseID = nil
         activeSetID = nil
         activeWorkoutSession = nil
+        workoutSummary = nil
         session = nil
         exerciseIDMap = [:]
         setIDMap = [:]
@@ -582,7 +635,6 @@ private actor BackendSessionCoordinator {
         let sets: [YokuUniffi.WorkoutSet]
         let liftsByExerciseId: [Int64: [Double]]
         let modifications: [YokuUniffi.Modification]
-        let intention: String?
         
         func withModifications(_ mods: [YokuUniffi.Modification]) -> Snapshot {
             Snapshot(
@@ -591,8 +643,7 @@ private actor BackendSessionCoordinator {
                 exercises: exercises,
                 sets: sets,
                 liftsByExerciseId: liftsByExerciseId,
-                modifications: mods,
-                intention: intention
+                modifications: mods
             )
         }
     }
@@ -754,21 +805,13 @@ private actor BackendSessionCoordinator {
             return dict
         }
         
-        let intention: String? = try await {
-            if let activeSession = try await YokuUniffi.getInProgressWorkoutSession(session: session) {
-                return activeSession.intention()
-            }
-            return nil
-        }()
-
         return Snapshot(
             session: session,
             workout: workout,
             exercises: exercises,
             sets: sets,
             liftsByExerciseId: liftsByExerciseId,
-            modifications: [],
-            intention: intention
+            modifications: []
         )
     }
 

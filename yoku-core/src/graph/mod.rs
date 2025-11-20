@@ -30,7 +30,6 @@ impl GraphManager {
             .get_or_try_init(|| async {
                 let host = env::var("NEO4J_HOST").expect("NEO4J_HOST environment variable not set");
                 let user = env::var("NEO4J_USER").expect("NEO4J_USER environment variable not set");
-                // intentionally do NOT log the password
                 let _password = env::var("NEO4J_PASSWORD")
                     .expect("NEO4J_PASSWORD environment variable not set");
 

@@ -27,8 +27,7 @@ impl From<&str> for YokuError {
 }
 
 impl YokuError {
-    /// Create a `YokuError::Common` from any type that implements `std::fmt::Display`.
-    pub fn with_display<D: std::fmt::Display>(d: D) -> Self {
+        pub fn with_display<D: std::fmt::Display>(d: D) -> Self {
         YokuError::Common(d.to_string())
     }
 }
