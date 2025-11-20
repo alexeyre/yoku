@@ -17,7 +17,6 @@ enum LoadingStyle: String, CaseIterable, Identifiable {
         }
     }
 
-    // Frames for each style
     var frames: [String] {
         switch self {
         case .normal:
@@ -35,14 +34,14 @@ enum LoadingStyle: String, CaseIterable, Identifiable {
                     "[.  ]"]
         case .orbiting:
             return [
-                "⠁", // top
-                "⠉", // top-right
-                "⠈", // right
-                "⠘", // bottom-right
-                "⠐", // bottom
-                "⠰", // bottom-left
-                "⠤", // left
-                "⠄"  // top-left
+                "⠁", 
+                "⠉", 
+                "⠈", 
+                "⠘", 
+                "⠐", 
+                "⠰", 
+                "⠤", 
+                "⠄" 
             ]
             
         case .arrows:
@@ -62,7 +61,6 @@ enum LoadingStyle: String, CaseIterable, Identifiable {
             ]
 
         case .glitchy:
-            // Intentionally janky/glitchy feel: irregular shapes and order
             return ["[   ]",
                     "[¿  ]",
                     "[ ▒ ]",
@@ -88,7 +86,6 @@ struct LoadingSettings {
 }
 
 extension EnvironmentValues {
-    // Optional: allow injecting a style via environment if desired in the future
     var loadingStyle: LoadingStyle {
         get { self[LoadingStyleKey.self] }
         set { self[LoadingStyleKey.self] = newValue }

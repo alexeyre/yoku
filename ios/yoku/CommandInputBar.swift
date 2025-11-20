@@ -3,7 +3,7 @@ import SwiftUI
 struct CommandInputBar: View {
     @State private var inputText: String = ""
     @State private var isProcessing: Bool = false
-    @EnvironmentObject var session: Session
+    @EnvironmentObject var workoutStore: WorkoutStore
 
     var body: some View {
         HStack(alignment: .center, spacing: 6) {
@@ -19,7 +19,7 @@ struct CommandInputBar: View {
             
             if isProcessing {
                 SpinnerView()
-                    .transition(.opacity)
+                .transition(.opacity)
             }
         }
         .padding(.horizontal, 12)
@@ -33,7 +33,7 @@ struct CommandInputBar: View {
 
         Task {
             do {
-                try await session.classifyAndProcessInput(input: cmd)
+                try await workoutStore.classifyAndProcessInput(input: cmd)
             } catch {
                 print("Error processing command: \(error)")
             }

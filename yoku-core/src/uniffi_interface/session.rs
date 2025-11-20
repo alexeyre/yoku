@@ -4,9 +4,8 @@ use crate::session::Session;
 use crate::uniffi_interface::errors::YokuError;
 use crate::uniffi_interface::modifications::{Modification, UpdateWorkoutSetResult};
 use crate::uniffi_interface::objects::{
-    Exercise, WorkoutSession, WorkoutSet, WorkoutSuggestion, WorkoutSummary,
+    ActiveWorkoutState, Exercise, WorkoutSession, WorkoutSet, WorkoutSuggestion, WorkoutSummary,
 };
-use log::*;
 use std::sync::Arc;
 
 #[uniffi::export]
@@ -282,4 +281,13 @@ pub async fn classify_and_process_input(
         visible_set_backend_ids,
     ))?;
     Ok(modifications)
+}
+
+#[uniffi::export]
+pub async fn get_active_workout_state(
+    session: &Session,
+) -> std::result::Result<ActiveWorkoutState, YokuError> {
+    let rt = crate::runtime::init_global_runtime_blocking();
+    let state = rt.block_on(session.get_active_workout_state())?;
+    Ok(state)
 }

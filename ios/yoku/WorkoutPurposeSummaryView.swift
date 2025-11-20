@@ -2,7 +2,7 @@ import SwiftUI
 import YokuUniffi
 
 struct WorkoutPurposeSummaryView: View {
-    @EnvironmentObject var workoutState: Session
+    @EnvironmentObject var workoutState: WorkoutStore
     @State private var summaryMessage: String = "Analyzing workout…"
     @State private var summaryEmoji: String = "✨"
     @State private var displayedText: String = ""
@@ -180,5 +180,5 @@ struct TypingLineView: View {
 #Preview {
     WorkoutPurposeSummaryView()
         .preferredColorScheme(.dark)
-        .environmentObject(Session())
+        .environmentObject(WorkoutStore.preview)
 }

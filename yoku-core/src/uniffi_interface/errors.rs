@@ -27,7 +27,7 @@ impl From<&str> for YokuError {
 }
 
 impl YokuError {
-        pub fn with_display<D: std::fmt::Display>(d: D) -> Self {
+    pub fn with_display<D: std::fmt::Display>(d: D) -> Self {
         YokuError::Common(d.to_string())
     }
 }

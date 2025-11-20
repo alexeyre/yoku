@@ -664,8 +664,8 @@ Return only valid JSON."#.to_string()
 
     pub fn user_suggestion_prompt(
         &self,
-        current_exercises: &[(String, i64)], 
-        past_performance: &str,              
+        current_exercises: &[(String, i64)],
+        past_performance: &str,
     ) -> String {
         let exercises_list: String = current_exercises
             .iter()
@@ -712,8 +712,8 @@ Return ONLY the JSON object."#.to_string()
 
     pub fn user_summary_prompt(
         &self,
-        current_exercises: &[(String, i64)], 
-        detailed_exercises: &[(String, i64, String)], 
+        current_exercises: &[(String, i64)],
+        detailed_exercises: &[(String, i64, String)],
     ) -> String {
         if current_exercises.is_empty() {
             return "No exercises added yet.".to_string();
@@ -721,19 +721,25 @@ Return ONLY the JSON object."#.to_string()
 
         let total_sets: i64 = current_exercises.iter().map(|(_, count)| count).sum();
         let exercise_count = current_exercises.len();
-        
+
         let exercises_list: String = detailed_exercises
             .iter()
             .map(|(_, _, detail)| format!("- {}", detail))
             .collect::<Vec<_>>()
             .join("\n");
 
-        let has_rpe = detailed_exercises.iter().any(|(_, _, detail)| detail.contains("RPE"));
-        let high_rpe_count = detailed_exercises.iter()
+        let has_rpe = detailed_exercises
+            .iter()
+            .any(|(_, _, detail)| detail.contains("RPE"));
+        let high_rpe_count = detailed_exercises
+            .iter()
             .filter(|(_, _, detail)| {
                 if let Some(rpe_start) = detail.find("@") {
-                    if let Some(rpe_end) = detail[rpe_start+1..].find("RPE") {
-                        if let Ok(rpe) = detail[rpe_start+1..rpe_start+1+rpe_end].trim().parse::<f64>() {
+                    if let Some(rpe_end) = detail[rpe_start + 1..].find("RPE") {
+                        if let Ok(rpe) = detail[rpe_start + 1..rpe_start + 1 + rpe_end]
+                            .trim()
+                            .parse::<f64>()
+                        {
                             return rpe >= 8.0;
                         }
                     }
@@ -828,7 +834,7 @@ pub async fn generate_exercise_to_equipment_and_muscles(
 pub struct WorkoutSuggestion {
     pub title: String,
     pub subtitle: Option<String>,
-    pub suggestion_type: String, 
+    pub suggestion_type: String,
     pub exercise_name: Option<String>,
     pub reasoning: Option<String>,
 }
@@ -868,10 +874,7 @@ pub enum Command {
         rpe: Option<f64>,
     },
     #[serde(rename = "update_summary")]
-    UpdateSummary {
-        message: String,
-        emoji: String,
-    },
+    UpdateSummary { message: String, emoji: String },
     #[serde(rename = "unknown")]
     Unknown { input: String },
 }

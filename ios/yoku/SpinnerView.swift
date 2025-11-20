@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct SpinnerView: View {
-    // If a specific style is passed, use it; otherwise read the global selection via AppStorage.
     var style: LoadingStyle?
 
     @AppStorage(LoadingSettings.appStorageKey) private var storedStyleRaw: String = LoadingStyle.normal.rawValue
@@ -52,7 +51,6 @@ struct SpinnerView: View {
 
 
 #Preview {
-    // Show all available spinner styles with labels
     VStack(alignment: .leading, spacing: 12) {
         ForEach(LoadingStyle.allCases) { style in
             HStack(spacing: 12) {

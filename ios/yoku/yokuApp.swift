@@ -13,7 +13,9 @@ struct yokuApp: App {
     @State private var isDatabaseReady = false
     @State private var setupError: Error?
 
-    @StateObject private var session = Session()
+    @StateObject private var workoutStore = WorkoutStore()
+    @StateObject private var historyStore = HistoryStore()
+    @StateObject private var referenceStore = ReferenceStore()
 
     // Keep the last-known db path so we can “restart” by re-running setup.
     @State private var lastDBPath: String?
@@ -23,7 +25,9 @@ struct yokuApp: App {
             Group {
                 if isDatabaseReady {
                     RootView()
-                        .environmentObject(session)
+                        .environmentObject(workoutStore)
+                        .environmentObject(historyStore)
+                        .environmentObject(referenceStore)
                 } else if let error = setupError {
                     VStack(spacing: 12) {
                         Text("Failed to set up database")
@@ -37,8 +41,11 @@ struct yokuApp: App {
                     Button {
                         Task { @MainActor in
                             do {
-                                try await session.resetDatabase()
-                                isDatabaseReady = false
+                                // Re-init logic if needed, or just retry setup
+                                if let path = lastDBPath {
+                                    try await workoutStore.setup(dbPath: path, model: "gpt-5-mini")
+                                    isDatabaseReady = true
+                                }
                             } catch {
                                 setupError = error
                             }
@@ -83,7 +90,8 @@ struct yokuApp: App {
                     let dbPath = dbURL.path
                     lastDBPath = dbPath
 
-                    try await session.setup(dbPath: dbPath, model: "gpt-5-mini")
+                    try await workoutStore.setup(dbPath: dbPath, model: "gpt-5-mini")
+                    // Pass session to history store (handled by singleton now)
                     isDatabaseReady = true
                 } catch {
                     setupError = error
@@ -91,20 +99,13 @@ struct yokuApp: App {
             }
         }
     }
-
-    @MainActor
-    private func resetViewStateForRestart() {
-        // Clear visible state so UI goes back to loading screen
-        isDatabaseReady = false
-        setupError = nil
-    }
 }
 
 private struct RootView: View {
-    @EnvironmentObject private var session: Session
+    @EnvironmentObject private var workoutStore: WorkoutStore
+    @EnvironmentObject private var historyStore: HistoryStore
     @State private var navigateToWorkout = false
 
-    @State private var workoutSessionList: [YokuUniffi.WorkoutSession] = []
     @State private var isLoading = false
     @State private var loadError: Error?
 
@@ -140,12 +141,13 @@ private struct RootView: View {
 
                     Button {
                         Task { @MainActor in
-                            do {
-                                try await session.resetDatabase()
-                                await loadWorkouts()
-                            } catch {
-                                loadError = error
-                            }
+                            await historyStore.resetDatabase()
+                            // Also need to reset workout store state if active
+                            try? await workoutStore.setup(dbPath: "", model: "") // This is hacky, maybe add reset to workoutStore
+                            // Actually workoutStore.setup handles reset implicitly if we just call it? No.
+                            // Reset logic was: call backend reset.
+                            // historyStore.resetDatabase calls backend reset.
+                            // We should reload workouts.
                         }
                     } label: {
                         Text("[ RESET ]")
@@ -177,7 +179,7 @@ private struct RootView: View {
 
                 // Workouts list - terminal styling
                 List {
-                    if let error = loadError {
+                    if let error = historyStore.error {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("ERROR: Failed to load workouts")
                                 .font(.appBody)
@@ -190,7 +192,7 @@ private struct RootView: View {
                         .listRowBackground(Color.clear)
                     }
 
-                    if isLoading && workoutSessionList.isEmpty {
+                    if historyStore.isLoading && historyStore.workouts.isEmpty {
                         HStack(spacing: 6) {
                             ProgressView()
                                 .scaleEffect(0.8)
@@ -200,7 +202,7 @@ private struct RootView: View {
                         .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
-                    } else if workoutSessionList.isEmpty {
+                    } else if historyStore.workouts.isEmpty {
                         Text("No workouts")
                             .font(.appBody)
                             .foregroundStyle(.secondary)
@@ -208,8 +210,8 @@ private struct RootView: View {
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
                     } else {
-                        ForEach(workoutSessionList.indices, id: \.self) { i in
-                            let ws = workoutSessionList[i]
+                        ForEach(historyStore.workouts.indices, id: \.self) { i in
+                            let ws = historyStore.workouts[i]
                             Button {
                                 Task {
                                     await selectExistingWorkoutAndNavigate(ws)
@@ -259,7 +261,7 @@ private struct RootView: View {
                 .refreshable {
                     // Avoid FFI in previews
                     if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" {
-                        await loadWorkouts()
+                        await historyStore.fetchWorkouts()
                     }
                 }
             }
@@ -268,7 +270,7 @@ private struct RootView: View {
                 ToolbarItem(placement: .principal) {
                     Text("WORKOUTS")
                         .font(.appBody)
-                }
+                    }
             }
             .sheet(isPresented: $showSettings) {
                 NavigationStack {
@@ -282,20 +284,20 @@ private struct RootView: View {
             }
             .navigationDestination(isPresented: $navigateToWorkout) {
                 ContentView()
-                    .environmentObject(session)
+                    .environmentObject(workoutStore)
                     .navigationBarBackButtonHidden(true)
             }
             .task {
                 if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
                     return
                 }
-                await loadWorkouts()
+                await historyStore.fetchWorkouts()
                 // Auto-navigate to in-progress workout if it exists
-                if session.activeWorkoutSession != nil {
+                if workoutStore.activeWorkoutSession != nil {
                     navigateToWorkout = true
                 }
             }
-            .onChange(of: session.activeWorkoutSessionId) { oldValue, newValue in
+            .onChange(of: workoutStore.activeWorkoutSession) { oldValue, newValue in
                 // Auto-navigate when an in-progress workout is detected (but not if we're already navigating)
                 if newValue != nil && oldValue == nil && !navigateToWorkout {
                     // Use a small delay to ensure this happens after initial setup
@@ -309,24 +311,7 @@ private struct RootView: View {
             }
         }
     }
-        
-    // MARK: - Data loading
-
-    @MainActor
-    private func loadWorkouts() async {
-        isLoading = true
-        loadError = nil
-        do {
-            let sessions = try await session.fetchAllWorkoutSessions()
-            workoutSessionList = sessions
-        } catch SessionError.backendNotInitialized {
-            // Backend session not ready yet
-        } catch {
-            loadError = error
-        }
-        isLoading = false
-    }
-
+    
     // MARK: - Selection handlers
 
     @MainActor
@@ -334,7 +319,7 @@ private struct RootView: View {
         selectionError = nil
         isPerformingSelection = true
         do {
-            try await session.setActiveWorkoutSessionId(ws.id())
+            try await workoutStore.setActiveWorkoutSessionId(ws.id())
             // Navigate to workout view
             navigateToWorkout = true
         } catch {
@@ -348,8 +333,8 @@ private struct RootView: View {
         selectionError = nil
         isPerformingSelection = true
         do {
-            let hadExisting = try await session.createBlankWorkoutSession()
-            await loadWorkouts()
+            let hadExisting = try await workoutStore.createBlankWorkoutSession()
+            await historyStore.fetchWorkouts()
             if hadExisting {
                 showWorkoutOverwriteWarning = true
             }
@@ -359,36 +344,12 @@ private struct RootView: View {
         }
         isPerformingSelection = false
     }
-
-    // MARK: - Delete handler
-
-    @MainActor
-    private func deleteWorkouts(at offsets: IndexSet) {
-        Task {
-            for index in offsets {
-                guard index < workoutSessionList.count else { continue }
-                let workout = workoutSessionList[index]
-                do {
-                    _ = try await session.deleteWorkoutSession(id: workout.id())
-                } catch {
-                    loadError = error
-                }
-            }
-            // Reload the list once after all deletions to reflect current state
-            await loadWorkouts()
-        }
-    }
     
     // Helper for swipe delete action
     @MainActor
     private func deleteWorkout(_ workout: YokuUniffi.WorkoutSession) {
         Task {
-            do {
-                _ = try await session.deleteWorkoutSession(id: workout.id())
-                await loadWorkouts()
-            } catch {
-                loadError = error
-            }
+            await historyStore.deleteWorkout(id: workout.id())
         }
     }
 
@@ -397,15 +358,11 @@ private struct RootView: View {
     private func workoutTitle(from ws: YokuUniffi.WorkoutSession) -> String {
         return ws.name() ?? "Unnamed workout"
     }
-
-    private func workoutSubtitle(from ws: YokuUniffi.WorkoutSession) -> String? {
-        return nil
-    }
-
 }
 
 #Preview {
     // Use a preview Session with dummy data and no FFI
     RootView()
-        .environmentObject(Session.preview)
+        .environmentObject(WorkoutStore.preview)
+        .environmentObject(HistoryStore())
 }

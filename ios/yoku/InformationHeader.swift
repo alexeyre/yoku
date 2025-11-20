@@ -10,7 +10,8 @@ import YokuUniffi
 
 struct InformationHeader: View {
     // Read values from the shared WorkoutState
-    @EnvironmentObject var workoutState: Session
+    @EnvironmentObject var workoutState: WorkoutStore
+    @ObservedObject var timerStore: TimerStore
     
     @Environment(\.dismiss) private var dismiss
     @State private var showCompleteConfirmation = false
@@ -42,7 +43,7 @@ struct InformationHeader: View {
     }
 
     var elapsedString: String {
-        let seconds = Int(workoutState.elapsedTime)
+        let seconds = Int(timerStore.elapsedTime)
         let hrs = seconds / 3600
         let mins = (seconds % 3600) / 60
         let secs = seconds % 60
@@ -92,13 +93,13 @@ struct InformationHeader: View {
                     }
 
                     Button {
-                        if workoutState.isTimerRunning && !workoutState.isTimerPaused {
-                            workoutState.pauseTimer()
-                        } else if workoutState.isTimerPaused {
-                            workoutState.resumeTimer()
+                        if timerStore.isRunning && !timerStore.isPaused {
+                            timerStore.pause()
+                        } else if timerStore.isPaused {
+                            timerStore.resume()
                         }
                     } label: {
-                        Text(workoutState.isTimerRunning && !workoutState.isTimerPaused ? "[ PAUSE ]" : "[ RESUME ]")
+                        Text(timerStore.isRunning && !timerStore.isPaused ? "[ PAUSE ]" : "[ RESUME ]")
                             .font(.appButton)
                             .foregroundStyle(.primary)
                     }
@@ -178,7 +179,7 @@ struct InformationHeader: View {
 }
 
 #Preview {
-    InformationHeader()
+    InformationHeader(timerStore: TimerStore())
         .preferredColorScheme(.dark)
-        .environmentObject(Session())
+        .environmentObject(WorkoutStore.preview)
 }

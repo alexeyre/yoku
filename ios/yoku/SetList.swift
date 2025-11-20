@@ -10,7 +10,7 @@ import Charts
 
 struct SetList: View {
     // Use the shared WorkoutState instead of local state
-    @EnvironmentObject var workoutState: Session
+    @EnvironmentObject var workoutState: WorkoutStore
     
     // Track seen set IDs to detect new sets
     @State private var seenSetIDs: Set<UUID> = []
@@ -63,7 +63,7 @@ struct SetList: View {
     // MARK: - Exercise List View
     
     private struct ExerciseListView: View {
-        @EnvironmentObject var workoutState: Session
+        @EnvironmentObject var workoutState: WorkoutStore
         @Binding var seenSetIDs: Set<UUID>
         @Binding var previousSetCounts: [UUID: Int]
         let availableWidth: CGFloat
@@ -90,7 +90,7 @@ struct SetList: View {
     // MARK: - Exercise Section View (New subview to help compiler)
 
     private struct ExerciseSectionView: View {
-        @EnvironmentObject var workoutState: Session
+        @EnvironmentObject var workoutState: WorkoutStore
         let exercise: ExerciseModel
         @Binding var seenSetIDs: Set<UUID>
         @Binding var previousSetCounts: [UUID: Int]
@@ -127,30 +127,21 @@ struct SetList: View {
                 }
             }
             
-            if let backendID = exercise.backendID {
-                content.glow(for: .exercise(id: backendID), cornerRadius: 12)
-            } else {
-                content
-            }
+            content
         }
     }
 
     // MARK: - Extracted sets list
 
     private struct ExerciseSetsList: View {
-        @EnvironmentObject var workoutState: Session
+        @EnvironmentObject var workoutState: WorkoutStore
         let exercise: ExerciseModel
         @Binding var seenSetIDs: Set<UUID>
         let availableWidth: CGFloat
 
         var body: some View {
             ForEach(exercise.sets) { set in
-                if let backendID = set.backendID {
-                    makeSetButton(for: set)
-                        .glow(for: .set(id: backendID), cornerRadius: 8)
-                } else {
-                    makeSetButton(for: set)
-                }
+                makeSetButton(for: set)
             }
         }
 
@@ -195,7 +186,7 @@ struct SetList: View {
     // MARK: - Exercise Row View
     
     private struct ExerciseRowView: View {
-        @EnvironmentObject var workoutState: Session
+        @EnvironmentObject var workoutState: WorkoutStore
         var exercise: ExerciseModel
         var previousSetCount: Int?
         let availableWidth: CGFloat
@@ -268,7 +259,7 @@ struct SetList: View {
     }
 
     private struct SetInformationView: View {
-        @EnvironmentObject var workoutState: Session
+        @EnvironmentObject var workoutState: WorkoutStore
         var set: ExerciseSetModel
         let availableWidth: CGFloat
         @State var weightText: String
@@ -299,6 +290,7 @@ struct SetList: View {
         }
 
         func propagateUpdates() async {
+            guard let backendID = set.backendID else { return }
             var setWeight = set.weight
             var setReps = set.reps
             if let newSetWeight = Double(weightText) {
@@ -307,10 +299,7 @@ struct SetList: View {
             if let newSetReps = Int64(repsText) {
                 setReps = newSetReps
             }
-            do {
-                try await workoutState.updateWorkoutSet(id: self.set.backendID!, weight: setWeight, reps: setReps)
-            } catch {
-            }
+            try? await workoutState.updateWorkoutSet(id: backendID, weight: setWeight, reps: setReps)
             weightText = String(format: "%.1f", setWeight)
             repsText = String(format: "%lld", setReps)
         }
@@ -323,7 +312,6 @@ struct SetList: View {
                     .frame(width: setLabelWidth, alignment: .leading)
                 
                 HStack(spacing: 0) {
-                    
                     TextField("Set weight", text: $weightText)
                         .onSubmit {
                             Task { await propagateUpdates() }
@@ -377,7 +365,8 @@ struct SetList: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onChange(of: set.weight) { _, newValue in
-                if abs(Double(weightText) ?? 0 - newValue) > 0.01 {
+                let currentTextVal = Double(weightText) ?? 0
+                if abs(currentTextVal - newValue) > 0.01 {
                     syncStateFromSet()
                 }
             }
@@ -395,7 +384,7 @@ struct SetList: View {
     // MARK: - Extracted Chart Component
 
     private struct SetChartView: View {
-        @EnvironmentObject var workoutState: Session
+        @EnvironmentObject var workoutState: WorkoutStore
         let exerciseName: String?
         let dataPoints: [(Date, Double)]
         let activeSetIndex: Int?
@@ -463,5 +452,5 @@ struct SetList: View {
 #Preview {
     SetList()
         .preferredColorScheme(.dark)
-        .environmentObject(Session())
+        .environmentObject(WorkoutStore.preview)
 }

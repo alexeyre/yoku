@@ -2,14 +2,13 @@ import SwiftUI
 import YokuUniffi
 
 struct ContentView: View {
-    @EnvironmentObject var session: Session
-    @StateObject private var glowSystem = GlowSystem()
+    @EnvironmentObject var workoutStore: WorkoutStore
 
     var body: some View {
         VStack(spacing: 0) {
             // Pinned header (top)
             VStack(spacing: 0) {
-                InformationHeader()
+                InformationHeader(timerStore: workoutStore.timerStore)
                     .background(Color(.systemBackground))
                 WorkoutPurposeSummaryView()
                     .background(Color(.systemBackground))
@@ -17,18 +16,14 @@ struct ContentView: View {
 
             // Scrollable middle content with command bar at bottom
             SetList()
-                .environmentObject(session)
+                .environmentObject(workoutStore)
         }
-        .environmentObject(session)
-        .environmentObject(glowSystem)
-        .onReceive(session.glowPublisher) {
-            glowSystem.register($0)
-        }
+        .environmentObject(workoutStore)
         .onAppear {
             // Auto-start timer if workout exists and timer not already running
-            if session.activeWorkoutSession != nil && !session.isTimerRunning && session.workoutStartTime == nil {
-                session.workoutStartTime = Date()
-                session.startTimer()
+            if workoutStore.activeWorkoutSession != nil && !workoutStore.isTimerRunning && workoutStore.workoutStartTime == nil {
+                workoutStore.workoutStartTime = Date()
+                workoutStore.startTimer()
             }
         }
     }
@@ -36,5 +31,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .environmentObject(Session.preview)
+        .environmentObject(WorkoutStore.preview)
 }

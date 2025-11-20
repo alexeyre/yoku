@@ -55,7 +55,7 @@ pub async fn create_workout_session(
     let status_str = status.unwrap_or_else(|| "in_progress".to_string());
     let now = chrono::Utc::now().timestamp();
 
-    let res =     sqlx::query_as::<_, WorkoutSession>(
+    let res = sqlx::query_as::<_, WorkoutSession>(
         "INSERT INTO workout_sessions (user_id, name, date, duration_seconds, notes, status, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
          RETURNING id, user_id, name, date, duration_seconds, notes, status, summary, created_at, updated_at"

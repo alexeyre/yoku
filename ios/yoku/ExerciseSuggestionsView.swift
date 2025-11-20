@@ -9,7 +9,7 @@ struct ExerciseSuggestion: Identifiable, Hashable {
 }
 
 struct ExerciseSuggestionsView: View {
-    @EnvironmentObject var workoutState: Session
+    @EnvironmentObject var workoutState: WorkoutStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -34,5 +34,5 @@ struct ExerciseSuggestionsView: View {
 #Preview {
     ExerciseSuggestionsView()
         .preferredColorScheme(.dark)
-        .environmentObject(Session())
+        .environmentObject(WorkoutStore.preview)
 }

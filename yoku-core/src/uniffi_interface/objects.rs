@@ -1,14 +1,8 @@
-use std::str::FromStr;
+use log::debug;
 
-use chrono::{NaiveDate, NaiveDateTime};
-use log::{debug, warn};
+use crate::{db, uniffi_interface::errors};
 
-use crate::{
-    db,
-    uniffi_interface::errors::{self, YokuError},
-};
-
-#[derive(uniffi::Object)]
+#[derive(uniffi::Object, Debug, Clone)]
 pub struct Exercise {
     id: i64,
     name: String,
@@ -46,11 +40,11 @@ pub struct WorkoutSession {
 
 #[uniffi::export]
 impl WorkoutSession {
-        fn id(&self) -> i64 {
+    fn id(&self) -> i64 {
         self.id
     }
 
-        fn name(&self) -> Option<String> {
+    fn name(&self) -> Option<String> {
         self.name.clone()
     }
 
@@ -58,15 +52,15 @@ impl WorkoutSession {
         self.date.format("%Y-%m-%d").to_string()
     }
 
-        fn status(&self) -> String {
+    fn status(&self) -> String {
         self.status.clone()
     }
 
-                fn duration_seconds(&self) -> i64 {
+    fn duration_seconds(&self) -> i64 {
         self.duration_seconds
     }
 
-        fn summary(&self) -> Option<String> {
+    fn summary(&self) -> Option<String> {
         self.summary.clone()
     }
 }
@@ -93,7 +87,7 @@ impl TryFrom<db::models::WorkoutSession> for WorkoutSession {
     }
 }
 
-#[derive(uniffi::Object)]
+#[derive(uniffi::Object, Debug, Clone)]
 pub struct WorkoutSet {
     pub id: i64,
     pub exercise_id: i64,
@@ -105,28 +99,28 @@ pub struct WorkoutSet {
 
 #[uniffi::export]
 impl WorkoutSet {
-        fn id(&self) -> i64 {
+    fn id(&self) -> i64 {
         self.id
     }
 
-        fn exercise_id(&self) -> i64 {
+    fn exercise_id(&self) -> i64 {
         self.exercise_id
     }
 
-        fn weight(&self) -> f64 {
+    fn weight(&self) -> f64 {
         self.weight
     }
 
-        fn reps(&self) -> i64 {
+    fn reps(&self) -> i64 {
         self.reps
     }
 
-        fn rpe(&self) -> Option<f64> {
+    fn rpe(&self) -> Option<f64> {
         debug!("RPE: {:?}", self.rpe);
         self.rpe
     }
 
-        fn notes(&self) -> Option<String> {
+    fn notes(&self) -> Option<String> {
         self.notes.clone()
     }
 }
@@ -212,4 +206,11 @@ impl From<crate::llm::WorkoutSummary> for WorkoutSummary {
             emoji: summary.emoji,
         }
     }
+}
+
+#[derive(uniffi::Record)]
+pub struct ActiveWorkoutState {
+    pub workout: std::sync::Arc<WorkoutSession>,
+    pub exercises: Vec<std::sync::Arc<Exercise>>,
+    pub sets: Vec<std::sync::Arc<WorkoutSet>>,
 }
