@@ -1,10 +1,3 @@
-//
-//  ObjectHelpers.swift
-//  yoku
-//
-//  Created by Alex Holder on 20/11/2025.
-//
-
 import Foundation
 import YokuUniffi
 

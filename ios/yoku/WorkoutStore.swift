@@ -10,15 +10,13 @@ final class WorkoutStore: ObservableObject {
     @Published var expanded: Set<UUID> = []
     @Published var activeExerciseID: UUID?
     @Published var activeSetID: UUID?
-    
+
     @Published private(set) var session: YokuUniffi.Session?
     @Published private(set) var activeWorkoutSession: YokuUniffi.WorkoutSession?
     @Published var workoutSummary: String? = nil
-    
-    // Timer state managed by TimerStore to avoid re-renders
+
     let timerStore = TimerStore()
-    
-    // Lifts cache (could be in ReferenceStore, but needed here for charts)
+
     @Published private(set) var liftsByExerciseId: [Int64: [Double]] = [:]
 
     @Published var lastError: Error?
@@ -36,8 +34,7 @@ final class WorkoutStore: ObservableObject {
     func setup(dbPath: String, model: String) async throws {
         do {
             try await backend.initialize(dbPath: dbPath, model: model)
-            
-            // Check for in-progress workout and load it automatically
+
             if let inProgressWorkout = try? await backend.getInProgressWorkoutSession() {
                 let elapsedFromDB = inProgressWorkout.durationSeconds()
                 timerStore.start(from: TimeInterval(elapsedFromDB))
@@ -52,14 +49,13 @@ final class WorkoutStore: ObservableObject {
             throw error
         }
     }
-    
+
     func setActiveWorkoutSessionId(_ id: Int64) async throws {
         do {
             try await backend.setActiveWorkoutSessionId(id)
             let state = try await backend.getActiveWorkoutState()
             apply(state: state)
-            
-            // Restore timer state
+
             if let workout = activeWorkoutSession, workout.status() == "in_progress" {
                 let elapsedFromDB = workout.durationSeconds()
                 if !timerStore.isRunning {
@@ -88,11 +84,8 @@ final class WorkoutStore: ObservableObject {
             throw error
         }
     }
-    
-    // MARK: - Granular Updates
-    
+
     func classifyAndProcessInput(input: String) async throws {
-        // Collect context
         let selectedSetBackendID: Int64? = {
             guard let activeSetID = activeSetID else { return nil }
             for exercise in exercises {
@@ -116,7 +109,7 @@ final class WorkoutStore: ObservableObject {
         
         apply(modifications: modifications)
     }
-    
+
     func updateWorkoutSet(id: Int64, weight: Double, reps: Int64) async throws {
         do {
             let result = try await backend.updateWorkoutSet(id: id, weight: weight, reps: reps)
@@ -137,23 +130,17 @@ final class WorkoutStore: ObservableObject {
         let durationSeconds = Int64(timerStore.elapsedTime)
         try await backend.completeWorkoutSession(durationSeconds: durationSeconds)
         timerStore.stop()
-        
-        // Clear active state
+
         activeWorkoutSession = nil
         exercises = []
     }
-    
-    // MARK: - State Application
-    
+
     private func apply(state: ActiveWorkoutState) {
         self.activeWorkoutSession = state.workout
         self.workoutSummary = state.workout.summary()
-        
-        // Rebuild full list
+
         updateExercises(with: state.exercises, sets: state.sets)
-        
-        // We might want to fetch lifts for these exercises if not cached?
-        // For now, we can fetch them lazily or trigger a background fetch.
+
         Task {
             await fetchLifts(for: state.exercises)
         }
@@ -164,7 +151,7 @@ final class WorkoutStore: ObservableObject {
             handleModification(mod)
         }
     }
-    
+
     private func handleModification(_ mod: YokuUniffi.Modification) {
         switch mod.modificationType {
         case .setAdded:
@@ -203,9 +190,7 @@ final class WorkoutStore: ObservableObject {
             }
         }
     }
-    
-    // MARK: - Local State Mutation Helpers
-    
+
     private func addSet(_ backendSet: YokuUniffi.WorkoutSet, to backendExercise: YokuUniffi.Exercise?) {
         let exerciseID = backendSet.exerciseId()
         guard let index = exercises.firstIndex(where: { $0.backendID == exerciseID }) else {
@@ -217,10 +202,8 @@ final class WorkoutStore: ObservableObject {
         
         var exercise = exercises[index]
         let setModel = mapSet(backendSet, indexInExercise: exercise.sets.count)
-        // Append to end as per Rust sort order
         exercise.sets.append(setModel)
-        
-        // Fix labels
+
         for (i, var s) in exercise.sets.enumerated() {
             s.label = "Set \(i + 1)"
             exercise.sets[i] = s
@@ -254,7 +237,6 @@ final class WorkoutStore: ObservableObject {
                 if updatedExercise.sets.isEmpty {
                     exercises.remove(at: exIndex)
                 } else {
-                    // Re-label
                     for (i, var s) in updatedExercise.sets.enumerated() {
                         s.label = "Set \(i + 1)"
                         updatedExercise.sets[i] = s
@@ -279,12 +261,10 @@ final class WorkoutStore: ObservableObject {
             name: backendExercise.name(),
             sets: [setModel]
         )
-        
-        // Insert sorted by name
+
         let index = exercises.firstIndex(where: { $0.name.localizedCaseInsensitiveCompare(exerciseModel.name) == .orderedDescending }) ?? exercises.count
         exercises.insert(exerciseModel, at: index)
-        
-        // Map ID
+
         exerciseIDMap[backendID] = exerciseModel.id
     }
     
@@ -302,9 +282,7 @@ final class WorkoutStore: ObservableObject {
             rpe: backendSet.rpe()
         )
     }
-    
-    // MARK: - Full Update (Fallback)
-    
+
     private func updateExercises(
         with backendExercises: [YokuUniffi.Exercise],
         sets backendSets: [YokuUniffi.WorkoutSet]
@@ -361,8 +339,7 @@ final class WorkoutStore: ObservableObject {
              reconcileSelectionAfterUpdate()
         }
     }
-    
-    
+
     func nextSet() {
     }
 
@@ -370,7 +347,7 @@ final class WorkoutStore: ObservableObject {
         guard let id = activeExerciseID else { return nil }
         return exercises.first { $0.id == id }
     }
-    
+
     var activeWorkoutSessionId: Int64? {
         activeWorkoutSession?.id()
     }
@@ -380,8 +357,6 @@ final class WorkoutStore: ObservableObject {
         return exercise.sets.firstIndex { $0.id == active }
     }
 
-    // MARK: - Expansion and selection helpers
-    
     func isExpanded(_ exercise: ExerciseModel) -> Bool {
         expanded.contains(exercise.id)
     }
@@ -432,8 +407,7 @@ final class WorkoutStore: ObservableObject {
 
         initializeActiveSelectionIfNeeded()
     }
-    
-    // Timer
+
     func startTimer() {
         timerStore.start()
     }
@@ -462,8 +436,7 @@ final class WorkoutStore: ObservableObject {
         get { timerStore.startTime }
         set { timerStore.startTime = newValue }
     }
-    
-    // Charting
+
     func dataSeries(for exercise: ExerciseModel?) -> [(Date, Double)] {
         guard let exercise, let backendID = exercise.backendID, let lifts = liftsByExerciseId[backendID] else { return [] }
         return lifts.map { (Date(), $0) }
@@ -476,11 +449,9 @@ final class WorkoutStore: ObservableObject {
             }
         }
     }
-    
-    // Helper for preview
+
     static var preview: WorkoutStore {
         let store = WorkoutStore()
-        // ... dummy data ...
         return store
     }
 }

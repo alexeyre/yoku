@@ -1,15 +1,7 @@
-//
-//  InformationHeader.swift
-//  yoku
-//
-//  Created by Alex Holder on 13/11/2025.
-//
-
 import SwiftUI
 import YokuUniffi
 
 struct InformationHeader: View {
-    // Read values from the shared WorkoutState
     @EnvironmentObject var workoutState: WorkoutStore
     @ObservedObject var timerStore: TimerStore
     
@@ -23,7 +15,6 @@ struct InformationHeader: View {
             }
             return total + exerciseVolume
         }
-        // Format as kg with one decimal place, or show "0 kg" if no volume
         if volume > 0 {
             return String(format: "%.1f kg", volume)
         } else {
@@ -35,7 +26,6 @@ struct InformationHeader: View {
         if let workout = workoutState.activeWorkoutSession {
             return workout.date()
         }
-        // Fallback to today's date if no workout
         let date = Date()
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -84,7 +74,6 @@ struct InformationHeader: View {
                                     try await workoutState.completeWorkout()
                                     dismiss()
                                 } catch {
-                                    // Handle error - could show alert
                                     print("Error completing workout: \(error)")
                                 }
                             }
@@ -119,38 +108,33 @@ struct InformationHeader: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 6)
             VStack(spacing: 4) {
-                // First line: elapsed time and date
                 HStack(spacing: 12) {
                     labeledValue("ELAPSED", elapsedString)
                     Spacer(minLength: 0)
                     Divider().frame(height: 12).opacity(0.15)
                     labeledValue("DATE", dateString, mirrored: true)
                 }
-                
-                // Second line: total volume and current exercise
+
                 HStack(spacing: 12) {
                     labeledValue("VOLUME", totalVolume)
                     Divider().frame(height: 12).opacity(0.15)
                     Spacer(minLength: 0)
                     labeledValue("CURRENT", currentExercise, mirrored: true)
                 }
-                
-                // Third line: totals
+
                 HStack(spacing: 12) {
                     labeledValue("EXERCISES", "\(totalExercises)")
                     Spacer(minLength: 0)
                     Divider().frame(height: 12).opacity(0.15)
                     labeledValue("SETS", "\(totalSets)", mirrored: true)
                 }
-                
-                // Optional: a very subtle hairline instead of a full divider
+
                 Rectangle()
                     .fill(Color.primary.opacity(0.08))
                     .frame(height: 0.5)
             }
             .font(.appBody)
             .padding(.horizontal, 12)
-            // Reduced bottom padding to pull the summary closer
             .padding(.top, 6)
             .padding(.bottom, 2)
             .contentShape(Rectangle())
@@ -163,7 +147,6 @@ struct InformationHeader: View {
                 Text(value)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    //.animation(.easeInOut(duration: 0.2), value: value)
                 Text(label)
                     .opacity(0.7)
             } else {
@@ -172,7 +155,6 @@ struct InformationHeader: View {
                 Text(value)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    //.animation(.easeInOut(duration: 0.2), value: value)
             }
         }
     }

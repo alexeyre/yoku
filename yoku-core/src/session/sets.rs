@@ -1,5 +1,3 @@
-//! Workout set operations (add, update, delete).
-
 use crate::db::models::{Exercise, UpdateWorkoutSet, WorkoutSet};
 use crate::db::operations::{
     add_multiple_sets_to_workout, add_workout_set, create_request_string_for_username,
@@ -17,12 +15,10 @@ use sqlx;
 use std::sync::Arc;
 
 impl Session {
-    /// Delete a workout set by ID.
     pub async fn delete_set(&self, set_id: i64) -> Result<u64> {
         delete_workout_set(&self.db_pool, set_id).await
     }
 
-    /// Get sets for a specific exercise.
     pub async fn get_sets_for_exercise(
         &self,
         exercise_id: i64,
@@ -31,7 +27,6 @@ impl Session {
         get_exercise_entries(&self.db_pool, exercise_id, limit).await
     }
 
-    /// Get all sets for the current workout.
     pub async fn get_all_sets(&self) -> Result<Vec<WorkoutSet>> {
         let workout_id = self.get_workout_id().await;
         if let Some(workout_id) = workout_id {
@@ -41,13 +36,11 @@ impl Session {
         }
     }
 
-    /// Replace a set from parsed data.
     pub async fn replace_set_from_parsed(&self, set_id: i64, parsed: &ParsedSet) -> Result<()> {
         update_workout_set_from_parsed(&self.db_pool, set_id, parsed).await?;
         Ok(())
     }
 
-    /// Update a workout set.
     pub async fn update_workout_set(
         &self,
         set_id: i64,
@@ -56,7 +49,6 @@ impl Session {
         update_workout_set(&self.db_pool, set_id, update).await
     }
 
-    /// Add a set from parsed data (without modifications).
     pub async fn add_set_from_parsed(&self, parsed: &ParsedSet) -> Result<()> {
         let session_id = self
             .get_workout_id()
@@ -114,7 +106,6 @@ impl Session {
         Ok(())
     }
 
-    /// Check if an exercise is new for the current session.
     async fn is_exercise_new_for_session(&self, exercise_id: i64) -> Result<bool> {
         let workout_id = self.get_workout_id().await;
         if let Some(workout_id) = workout_id {
@@ -131,7 +122,6 @@ impl Session {
         }
     }
 
-    /// Add a set from parsed data and return modifications.
     pub async fn add_set_from_parsed_with_modifications(
         &self,
         parsed: &ParsedSet,
@@ -236,7 +226,6 @@ impl Session {
         Ok(modifications)
     }
 
-    /// Update a workout set and return modifications.
     pub async fn update_workout_set_with_modifications(
         &self,
         set_id: i64,
@@ -266,7 +255,6 @@ impl Session {
         Ok((updated, modifications))
     }
 
-    /// Delete a set and return modifications.
     pub async fn delete_set_with_modifications(&self, set_id: i64) -> Result<Vec<Modification>> {
         let sets =
             get_sets_for_session(&self.db_pool, self.get_workout_id().await.unwrap()).await?;
@@ -285,7 +273,6 @@ impl Session {
         }])
     }
 
-    /// Get all exercises.
     pub async fn get_all_exercises(&self) -> Result<Vec<Exercise>> {
         crate::db::operations::get_all_exercises(&self.db_pool).await
     }

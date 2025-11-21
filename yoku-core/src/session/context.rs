@@ -1,5 +1,3 @@
-//! Context building and set resolution utilities.
-
 use crate::db::models::WorkoutSet;
 use crate::db::operations::{get_exercise_entries, get_sets_for_session, get_workout_session};
 use crate::session::Session;
@@ -7,7 +5,6 @@ use anyhow::Result;
 use std::collections::HashMap;
 
 impl Session {
-    /// Build a workout context string for LLM prompts.
     pub async fn build_workout_context_string(&self) -> Result<String> {
         let workout_id = self.get_workout_id().await;
         let Some(workout_id) = workout_id else {
@@ -119,7 +116,6 @@ impl Session {
         Ok(context)
     }
 
-    /// Resolve a set ID from a description string.
     pub fn resolve_set_id_from_description(
         &self,
         description: &str,

@@ -29,8 +29,6 @@ pub async fn reset_database(session: &Session) -> std::result::Result<(), YokuEr
     Ok(())
 }
 
-// #[uniffi::export]
-
 #[derive(uniffi::Object)]
 pub struct LiftDataPoint {
     pub timestamp: i64,

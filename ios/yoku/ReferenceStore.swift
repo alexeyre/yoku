@@ -10,11 +10,9 @@ final class ReferenceStore: ObservableObject {
     private let backend = BackendService.shared
     
     init() {}
-    
+
     func fetchLifts(for exerciseIDs: [Int64]) async {
         for id in exerciseIDs {
-            // Check if we already have data? 
-            // For now, simple fetch.
             if let lifts = try? await backend.getLiftsForExercise(id) {
                 recentLifts[id] = lifts
                 if let max = lifts.max() {
@@ -23,8 +21,7 @@ final class ReferenceStore: ObservableObject {
             }
         }
     }
-    
-    // Accessor for charts
+
     func lifts(for exerciseID: Int64?) -> [Double] {
         guard let id = exerciseID else { return [] }
         return recentLifts[id] ?? []

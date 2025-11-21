@@ -70,7 +70,6 @@ extension View {
     }
 }
 
-// Standard effect components for reuse
 struct LocalEffect: View {
     var gradientStops: [Gradient.Stop]
     var cornerRadius: CGFloat
@@ -105,7 +104,6 @@ struct LocalEffectNoBlur: View {
     }
 }
 
-// Original full-screen glow effect (kept for compatibility)
 struct GlowEffect: View {
     @State private var gradientStops: [Gradient.Stop] = LocalGlowEffect.generateGradientStops()
 

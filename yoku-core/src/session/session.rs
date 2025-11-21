@@ -1,5 +1,3 @@
-//! Core Session struct and initialization.
-
 use crate::db;
 use crate::llm::LlmInterface;
 use anyhow::Result;
@@ -20,7 +18,6 @@ const fn get_openai_api_key() -> &'static str {
 }
 
 impl Session {
-    /// Create a new Session with database connection and LLM backend.
     pub async fn new(db_path: &str, model: String) -> Result<Self> {
         let options = SqliteConnectOptions::new()
             .filename(db_path)
@@ -52,7 +49,6 @@ impl Session {
         })
     }
 
-    /// Get the current active workout ID.
     pub async fn get_workout_id(&self) -> Option<i64> {
         self.workout_id.lock().await.clone()
     }

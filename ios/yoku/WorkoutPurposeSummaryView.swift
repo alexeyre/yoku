@@ -56,8 +56,7 @@ struct WorkoutPurposeSummaryView: View {
             }
             return
         }
-        
-        // Only show if we have exercises
+
         guard !workoutState.exercises.isEmpty else {
             if visible {
                 typingTask?.cancel()
@@ -71,14 +70,12 @@ struct WorkoutPurposeSummaryView: View {
             }
             return
         }
-        
-        // Parse summary from JSON if available
+
         guard let summaryJson = workoutState.workoutSummary,
               let data = summaryJson.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let message = json["message"] as? String,
               let emoji = json["emoji"] as? String else {
-            // No summary yet, hide view
             if visible {
                 typingTask?.cancel()
                 typingTask = nil
@@ -94,8 +91,7 @@ struct WorkoutPurposeSummaryView: View {
         
         let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedEmoji = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Only update if message changed
+
         guard trimmedMessage != summaryMessage || trimmedEmoji != summaryEmoji else {
             return
         }
@@ -115,22 +111,19 @@ struct WorkoutPurposeSummaryView: View {
             await typeText(summaryMessage)
         }
     }
-    
+
     @MainActor
     private func typeText(_ text: String) async {
-        // Reset and start typing
         displayedText = ""
         isTyping = true
-        
-        // Start glow immediately
+
         withAnimation(.easeInOut(duration: 0.2)) {
             showGlow = true
         }
         
         let characters = Array(text)
-        
+
         for character in characters {
-            // Check if task was cancelled
             if Task.isCancelled {
                 withAnimation(.easeOut(duration: 0.2)) {
                     showGlow = false
@@ -141,8 +134,7 @@ struct WorkoutPurposeSummaryView: View {
             displayedText += String(character)
             try? await Task.sleep(nanoseconds: 30_000_000)
         }
-        
-        // Typing complete - hide cursor and glow
+
         isTyping = false
         withAnimation(.easeOut(duration: 0.3)) {
             showGlow = false
@@ -150,7 +142,6 @@ struct WorkoutPurposeSummaryView: View {
     }
 }
 
-// Smooth typing view with animated cursor
 struct TypingLineView: View {
     let text: String
     let isTyping: Bool

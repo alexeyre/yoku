@@ -10,12 +10,10 @@ final class HistoryStore: ObservableObject {
     @Published var error: Error?
     
     private let backend = BackendService.shared
-    
+
     init() {}
-    
-    // Deprecated: Session is managed by BackendService
+
     func setSession(_ session: YokuUniffi.Session) {
-        // no-op
     }
     
     func fetchWorkouts() async {

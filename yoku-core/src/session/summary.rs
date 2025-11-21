@@ -1,5 +1,3 @@
-//! Workout summary and suggestions generation.
-
 use crate::db::operations::{
     get_exercise_entries, get_sets_for_session, get_workout_session, update_workout_summary,
 };
@@ -17,7 +15,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 impl Session {
-    /// Get the active workout state.
     pub async fn get_active_workout_state(&self) -> Result<ActiveWorkoutState> {
         let workout_id = self.get_workout_id().await;
         let Some(workout_id) = workout_id else {
@@ -41,7 +38,6 @@ impl Session {
         })
     }
 
-    /// Get workout suggestions.
     pub async fn get_workout_suggestions(&self) -> Result<Vec<WorkoutSuggestion>> {
         let session_id = self
             .get_workout_id()
@@ -109,7 +105,6 @@ impl Session {
         .await
     }
 
-    /// Get workout summary.
     pub async fn get_workout_summary(&self) -> Result<WorkoutSummary> {
         let session_id = self
             .get_workout_id()

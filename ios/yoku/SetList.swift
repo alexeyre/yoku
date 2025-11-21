@@ -1,20 +1,10 @@
-//
-//  SetList.swift
-//  yoku
-//
-//  Created by Alex Holder on 13/11/2025.
-//
-
 import SwiftUI
 import Charts
 
 struct SetList: View {
-    // Use the shared WorkoutState instead of local state
     @EnvironmentObject var workoutState: WorkoutStore
     
-    // Track seen set IDs to detect new sets
     @State private var seenSetIDs: Set<UUID> = []
-    // Track previous set counts per exercise to detect new sets
     @State private var previousSetCounts: [UUID: Int] = [:]
 
     
@@ -41,17 +31,12 @@ struct SetList: View {
         }
         .onAppear {
             workoutState.initializeActiveSelectionIfNeeded()
-            // Initialize seen set IDs with current sets
             seenSetIDs = Set(workoutState.exercises.flatMap { $0.sets.map { $0.id } })
-            // Initialize previous set counts
             previousSetCounts = Dictionary(uniqueKeysWithValues: workoutState.exercises.map { ($0.id, $0.sets.count) })
         }
         .onChange(of: workoutState.exercises) { _, _ in
-            // Update seen set IDs when exercises change
             let currentSetIDs = Set(workoutState.exercises.flatMap { $0.sets.map { $0.id } })
-            // Keep track of all sets we've seen (don't remove deleted ones immediately)
             seenSetIDs.formUnion(currentSetIDs)
-            // Update previous set counts for existing exercises
             for exercise in workoutState.exercises {
                 if previousSetCounts[exercise.id] == nil {
                     previousSetCounts[exercise.id] = exercise.sets.count
@@ -59,9 +44,7 @@ struct SetList: View {
             }
         }
     }
-    
-    // MARK: - Exercise List View
-    
+
     private struct ExerciseListView: View {
         @EnvironmentObject var workoutState: WorkoutStore
         @Binding var seenSetIDs: Set<UUID>
@@ -87,8 +70,6 @@ struct SetList: View {
         }
     }
 
-    // MARK: - Exercise Section View (New subview to help compiler)
-
     private struct ExerciseSectionView: View {
         @EnvironmentObject var workoutState: WorkoutStore
         let exercise: ExerciseModel
@@ -97,11 +78,9 @@ struct SetList: View {
         let availableWidth: CGFloat
 
         var body: some View {
-            // Hoist optional subscript to reduce inference complexity
             let prevCount: Int? = previousSetCounts[exercise.id]
 
             let content = VStack(spacing: 0) {
-                // Exercise row (tappable)
                 ExerciseRowView(
                     exercise: exercise,
                     previousSetCount: prevCount,
@@ -117,7 +96,6 @@ struct SetList: View {
                     previousSetCounts[exercise.id] = newValue
                 }
 
-                // Sets (expanded) extracted to its own subview to reduce body complexity
                 if workoutState.isExpanded(exercise) {
                     ExerciseSetsList(
                         exercise: exercise,
@@ -130,8 +108,6 @@ struct SetList: View {
             content
         }
     }
-
-    // MARK: - Extracted sets list
 
     private struct ExerciseSetsList: View {
         @EnvironmentObject var workoutState: WorkoutStore
@@ -182,9 +158,7 @@ struct SetList: View {
             .transition(.opacity.combined(with: .move(edge: .top)))
         }
     }
-    
-    // MARK: - Exercise Row View
-    
+
     private struct ExerciseRowView: View {
         @EnvironmentObject var workoutState: WorkoutStore
         var exercise: ExerciseModel
@@ -239,8 +213,6 @@ struct SetList: View {
             .animation(.easeInOut(duration: 0.2), value: exercise.id == workoutState.activeExerciseID)
         }
     }
-
-    // MARK: - Delete handler
 
     @MainActor
     private func deleteSets(for exercise: ExerciseModel, at offsets: IndexSet) {
@@ -379,9 +351,6 @@ struct SetList: View {
             }
         }
     }
-
-
-    // MARK: - Extracted Chart Component
 
     private struct SetChartView: View {
         @EnvironmentObject var workoutState: WorkoutStore

@@ -1,7 +1,6 @@
 import Foundation
 import YokuUniffi
 
-// Singleton to manage the Rust backend session lifetime and concurrency
 actor BackendService {
     static let shared = BackendService()
     
@@ -16,7 +15,6 @@ actor BackendService {
     }
     
     func initialize(dbPath: String, model: String) async throws {
-        // If already initialized with same params, do nothing
         if let _ = session, self.databasePath == dbPath, self.model == model {
             return
         }
@@ -33,11 +31,7 @@ actor BackendService {
         }
         return s
     }
-    
-    // Wrappers for Session methods to ensure thread safety if needed, 
-    // though Uniffi objects are generally thread-safe (Sendable).
-    // The main benefit here is centralized error handling and session availability check.
-    
+
     func getActiveWorkoutState() async throws -> ActiveWorkoutState {
         let s = try getSession()
         return try await YokuUniffi.getActiveWorkoutState(session: s)
@@ -47,9 +41,7 @@ actor BackendService {
         let s = try getSession()
         return try await YokuUniffi.getAllWorkoutSessions(session: s)
     }
-    
-    // ... Add other pass-throughs as needed by stores
-    
+
     func classifyAndProcessInput(
         input: String,
         selectedSetBackendID: Int64?,
