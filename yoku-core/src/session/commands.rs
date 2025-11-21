@@ -4,11 +4,12 @@ use crate::llm::{Command, ParsedSet, PromptBuilder, PromptContext, classify_comm
 use crate::session::Session;
 use crate::uniffi_interface::modifications::Modification;
 use anyhow::Result;
+use futures::future::try_join_all;
 use log::warn;
 use std::collections::HashMap;
 
 impl Session {
-    pub async fn classify_and_process_input_with_modifications(
+    pub async fn process_user_input(
         &self,
         input: &str,
         selected_set_backend_id: Option<i64>,
@@ -51,19 +52,19 @@ impl Session {
 
         let sets = self.get_all_sets().await?;
 
-        let mut all_modifications = Vec::new();
+        let modification_futures: Vec<_> = commands
+            .into_iter()
+            .map(|command| self.execute_command(command, &sets, &exercise_map))
+            .collect();
 
-        for command in commands {
-            let mods = self
-                .execute_command_with_modifications(command, &sets, &exercise_map)
-                .await?;
-            all_modifications.extend(mods);
-        }
+        let modification_results = try_join_all(modification_futures).await?;
+        let all_modifications: Vec<Modification> =
+            modification_results.into_iter().flatten().collect();
 
         Ok(all_modifications)
     }
 
-    async fn execute_command_with_modifications(
+    async fn execute_command(
         &self,
         command: Command,
         sets: &[WorkoutSet],

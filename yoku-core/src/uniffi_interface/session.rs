@@ -273,7 +273,7 @@ pub async fn classify_and_process_input(
     visible_set_backend_ids: Vec<i64>,
 ) -> std::result::Result<Vec<Modification>, YokuError> {
     let rt = crate::runtime::init_global_runtime_blocking();
-    let modifications = rt.block_on(session.classify_and_process_input_with_modifications(
+    let modifications = rt.block_on(session.process_user_input(
         input,
         selected_set_backend_id,
         visible_set_backend_ids,
