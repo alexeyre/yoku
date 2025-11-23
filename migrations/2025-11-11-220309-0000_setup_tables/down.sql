@@ -1,41 +1,32 @@
--- Revert the changes applied in up.sql for migration 2025-11-11-220309-0000_setup_tables
--- This file drops triggers, indexes, tables, the trigger function, and the pgcrypto extension.
--- Operations are defensive (IF EXISTS) and ordered to avoid FK/trigger dependency issues.
+DROP INDEX IF EXISTS idx_request_strings_user_id;
 
--- 1) Drop triggers that reference the trigger function
-DROP TRIGGER IF EXISTS trg_workout_sets_set_updated_at ON workout_sets;
-DROP TRIGGER IF EXISTS trg_workout_sessions_set_updated_at ON workout_sessions;
-DROP TRIGGER IF EXISTS trg_request_strings_set_updated_at ON request_strings;
-DROP TRIGGER IF EXISTS trg_users_set_updated_at ON users;
-DROP TRIGGER IF EXISTS trg_exercise_muscles_set_updated_at ON exercise_muscles;
-DROP TRIGGER IF EXISTS trg_exercises_set_updated_at ON exercises;
-DROP TRIGGER IF EXISTS trg_muscles_set_updated_at ON muscles;
+DROP INDEX IF EXISTS idx_workout_sessions_date;
+DROP INDEX IF EXISTS idx_workout_sessions_user_date;
+DROP INDEX IF EXISTS idx_workout_sessions_status;
+DROP INDEX IF EXISTS idx_workout_sessions_user_id;
 
--- 2) Drop explicit indexes (optional; dropping tables would remove them, but do it explicitly)
+DROP INDEX IF EXISTS idx_workout_sets_status;
+DROP INDEX IF EXISTS idx_workout_sets_created_at;
+DROP INDEX IF EXISTS idx_workout_sets_session_exercise;
 DROP INDEX IF EXISTS idx_workout_sets_exercise_id;
 DROP INDEX IF EXISTS idx_workout_sets_session_id;
+
+DROP INDEX IF EXISTS idx_exercise_equipment_equipment_id;
+DROP INDEX IF EXISTS idx_exercise_equipment_exercise_id;
+
+DROP INDEX IF EXISTS idx_exercise_muscles_relation_type;
 DROP INDEX IF EXISTS idx_exercise_muscles_muscle_id;
 DROP INDEX IF EXISTS idx_exercise_muscles_exercise_id;
-DROP INDEX IF EXISTS idx_request_strings_user_id;
-DROP INDEX IF EXISTS idx_workout_sessions_user_date;
 
-DROP INDEX IF EXISTS ux_exercises_slug;
-DROP INDEX IF EXISTS ux_users_username;
+DROP TABLE IF EXISTS workout_sets;
+DROP TABLE IF EXISTS workout_sessions;
+DROP TABLE IF EXISTS request_strings;
+DROP TABLE IF EXISTS exercise_equipment;
+DROP TABLE IF EXISTS exercise_muscles;
+DROP TABLE IF EXISTS exercises;
+DROP TABLE IF EXISTS equipment;
+DROP TABLE IF EXISTS muscles;
+DROP TABLE IF EXISTS users;
 
--- 3) Drop tables in an order that respects foreign-key relationships
---    Use IF EXISTS to be idempotent and CASCADE to ensure dependent objects are removed.
-DROP TABLE IF EXISTS workout_sets CASCADE;
-DROP TABLE IF EXISTS workout_sessions CASCADE;
-DROP TABLE IF EXISTS request_strings CASCADE;
-DROP TABLE IF EXISTS exercise_muscles CASCADE;
-DROP TABLE IF EXISTS exercises CASCADE;
-DROP TABLE IF EXISTS muscles CASCADE;
-DROP TABLE IF EXISTS users CASCADE;
-
--- 4) Drop the trigger function used to set updated_at
-DROP FUNCTION IF EXISTS set_updated_at() CASCADE;
-
--- 5) Optionally remove the pgcrypto extension if installed by this migration
-DROP EXTENSION IF EXISTS "pgcrypto";
-
--- End of down migration
+-- Drop migrations tracking table last
+DROP TABLE IF EXISTS _migrations;

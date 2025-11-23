@@ -9,7 +9,7 @@ struct SettingsView: View {
             set: { styleRaw = $0.rawValue }
         )
     }
-
+    
     var body: some View {
         Form {
             Section("Loading Indicator") {

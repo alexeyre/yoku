@@ -28,12 +28,27 @@ impl From<db::models::Exercise> for Exercise {
     }
 }
 
+#[derive(uniffi::Enum, Copy, Clone, Debug)]
+pub enum WorkoutStatus {
+    InProgress,
+    Completed,
+}
+
+impl From<db::models::WorkoutStatus> for WorkoutStatus {
+    fn from(s: db::models::WorkoutStatus) -> Self {
+        match s {
+            db::models::WorkoutStatus::InProgress => WorkoutStatus::InProgress,
+            db::models::WorkoutStatus::Completed => WorkoutStatus::Completed,
+        }
+    }
+}
+
 #[derive(uniffi::Object)]
 pub struct WorkoutSession {
     pub id: i64,
     pub name: Option<String>,
-    pub date: chrono::NaiveDate,
-    pub status: String,
+    pub datetime: chrono::DateTime<chrono::Utc>,
+    pub status: WorkoutStatus,
     pub duration_seconds: i64,
     pub summary: Option<String>,
 }
@@ -49,11 +64,15 @@ impl WorkoutSession {
     }
 
     fn date(&self) -> String {
-        self.date.format("%Y-%m-%d").to_string()
+        self.datetime.format("%Y-%m-%d").to_string()
     }
 
-    fn status(&self) -> String {
-        self.status.clone()
+    fn time(&self) -> String {
+        self.datetime.format("%H:%M:%S").to_string()
+    }
+
+    fn status(&self) -> WorkoutStatus {
+        self.status
     }
 
     fn duration_seconds(&self) -> i64 {
@@ -68,19 +87,13 @@ impl WorkoutSession {
 impl TryFrom<db::models::WorkoutSession> for WorkoutSession {
     type Error = errors::YokuError;
     fn try_from(s: db::models::WorkoutSession) -> Result<Self, errors::YokuError> {
-        debug!("Attempting to convert date {}", s.date);
-        let date = chrono::NaiveDate::parse_from_str(&s.date, "%Y-%m-%d")
-            .map_err(|e| errors::YokuError::Common(e.to_string()))?;
-        debug!(
-            "Successfully parsed date {} to {}",
-            s.date,
-            date.to_string()
-        );
+        let datetime = chrono::DateTime::from_timestamp(s.created_at, 0)
+            .expect(&format!("Cannot parse UNIX timestamp {}", s.created_at));
         Ok(WorkoutSession {
             id: s.id,
             name: s.name,
-            date,
-            status: s.status,
+            datetime,
+            status: s.status.into(),
             duration_seconds: s.duration_seconds,
             summary: s.summary,
         })

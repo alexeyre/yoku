@@ -1,4 +1,4 @@
-use crate::db::models::WorkoutSession;
+use crate::db::models::{WorkoutSession, WorkoutStatus};
 use crate::db::operations::{
     check_in_progress_workout_exists, complete_workout_session, create_workout_session,
     get_in_progress_workout, get_workout_session, update_workout_duration,
@@ -36,7 +36,7 @@ impl Session {
             None,
             None,
             None,
-            Some("in_progress".to_string()),
+            Some(WorkoutStatus::InProgress),
         )
         .await?;
         self.set_workout_id(workout.id).await?;
@@ -62,7 +62,7 @@ impl Session {
             Some(name.to_string()),
             None,
             None,
-            Some("in_progress".to_string()),
+            Some(WorkoutStatus::InProgress),
         )
         .await?;
         self.set_workout_id(workout.id).await?;
@@ -79,7 +79,7 @@ impl Session {
     }
 
     pub async fn get_all_workouts(&self) -> Result<Vec<WorkoutSession>> {
-        crate::db::operations::get_all_workout_sessions(&self.db_pool, Some("completed")).await
+        crate::db::operations::get_all_workout_sessions(&self.db_pool, Some(WorkoutStatus::Completed)).await
     }
 
     pub async fn get_all_workouts_including_in_progress(&self) -> Result<Vec<WorkoutSession>> {

@@ -113,15 +113,17 @@ impl Session {
 
         let workout = get_workout_session(&self.db_pool, session_id).await?;
         if let Some(cached_summary) = workout.summary {
-            if let Ok(summary_json) = serde_json::from_str::<serde_json::Value>(&cached_summary) {
-                if let (Some(message), Some(emoji)) = (
-                    summary_json.get("message").and_then(|v| v.as_str()),
-                    summary_json.get("emoji").and_then(|v| v.as_str()),
-                ) {
-                    return Ok(WorkoutSummary {
-                        message: message.to_string(),
-                        emoji: emoji.to_string(),
-                    });
+            if !cached_summary.trim().is_empty() {
+                if let Ok(summary_json) = serde_json::from_str::<serde_json::Value>(&cached_summary) {
+                    if let (Some(message), Some(emoji)) = (
+                        summary_json.get("message").and_then(|v| v.as_str()),
+                        summary_json.get("emoji").and_then(|v| v.as_str()),
+                    ) {
+                        return Ok(WorkoutSummary {
+                            message: message.to_string(),
+                            emoji: emoji.to_string(),
+                        });
+                    }
                 }
             }
         }

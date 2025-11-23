@@ -28,21 +28,25 @@ impl Session {
         ));
 
         if let Some(summary_json) = &workout.summary {
-            if let Ok(summary_value) = serde_json::from_str::<serde_json::Value>(summary_json) {
-                let message = summary_value
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let emoji = summary_value
-                    .get("emoji")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                context.push_str(&format!(
-                    "Cached Summary → message: \"{}\" | emoji: {}\n",
-                    message, emoji
-                ));
+            if !summary_json.trim().is_empty() {
+                if let Ok(summary_value) = serde_json::from_str::<serde_json::Value>(summary_json) {
+                    let message = summary_value
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let emoji = summary_value
+                        .get("emoji")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    context.push_str(&format!(
+                        "Cached Summary → message: \"{}\" | emoji: {}\n",
+                        message, emoji
+                    ));
+                } else {
+                    context.push_str("Cached Summary → (invalid JSON)\n");
+                }
             } else {
-                context.push_str("Cached Summary → (invalid JSON)\n");
+                context.push_str("Cached Summary → (empty)\n");
             }
         } else {
             context.push_str("Cached Summary → (none)\n");

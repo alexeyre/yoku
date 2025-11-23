@@ -31,9 +31,9 @@ final class WorkoutStore: ObservableObject {
         }
     }
 
-    func setup(dbPath: String, model: String) async throws {
+    func setup(dbPath: String, model: String, graphPath: String) async throws {
         do {
-            try await backend.initialize(dbPath: dbPath, model: model)
+            try await backend.initialize(dbPath: dbPath, model: model, graphPath: graphPath)
 
             if let inProgressWorkout = try? await backend.getInProgressWorkoutSession() {
                 let elapsedFromDB = inProgressWorkout.durationSeconds()
@@ -56,7 +56,7 @@ final class WorkoutStore: ObservableObject {
             let state = try await backend.getActiveWorkoutState()
             apply(state: state)
 
-            if let workout = activeWorkoutSession, workout.status() == "in_progress" {
+            if let workout = activeWorkoutSession, workout.status() == YokuUniffi.WorkoutStatus.inProgress {
                 let elapsedFromDB = workout.durationSeconds()
                 if !timerStore.isRunning {
                     timerStore.start(from: TimeInterval(elapsedFromDB))

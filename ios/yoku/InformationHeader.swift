@@ -56,30 +56,20 @@ struct InformationHeader: View {
         VStack {
                 HStack(spacing: 16) {
                     Button {
-                        showCompleteConfirmation = true
+                        Task {
+                            do {
+                                try await workoutState.completeWorkout()
+                                dismiss()
+                            } catch {
+                                print("Error completing workout: \(error)")
+                            }
+                        }
                     } label: {
                         Text("[ STOP ]")
                             .font(.appButton)
                             .foregroundStyle(.red)
                     }
                     .buttonStyle(.plain)
-                    .confirmationDialog(
-                        "Complete Workout?",
-                        isPresented: $showCompleteConfirmation,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Complete", role: .destructive) {
-                            Task {
-                                do {
-                                    try await workoutState.completeWorkout()
-                                    dismiss()
-                                } catch {
-                                    print("Error completing workout: \(error)")
-                                }
-                            }
-                        }
-                        Button("Cancel", role: .cancel) {}
-                    }
 
                     Button {
                         if timerStore.isRunning && !timerStore.isPaused {

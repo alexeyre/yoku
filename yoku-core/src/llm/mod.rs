@@ -272,6 +272,9 @@ impl LlmInterface {
         let raw = self.call(system, user).await?;
         debug!("raw LLM output len={}", raw.len());
         let stripped = strip_code_fences(&raw);
+        if stripped.trim().is_empty() {
+            return Err(anyhow!("LLM returned empty response"));
+        }
         let parsed: T = serde_json::from_str(stripped).map_err(|e| {
             error!("Cannot parse LLM JSON output: {} -- error: {}", stripped, e);
             anyhow!(format!(

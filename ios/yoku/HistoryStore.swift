@@ -10,12 +10,6 @@ final class HistoryStore: ObservableObject {
     @Published var error: Error?
     
     private let backend = BackendService.shared
-
-    init() {}
-
-    func setSession(_ session: YokuUniffi.Session) {
-    }
-    
     func fetchWorkouts() async {
         isLoading = true
         error = nil

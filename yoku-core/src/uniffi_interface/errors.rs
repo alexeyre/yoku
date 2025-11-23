@@ -6,6 +6,8 @@ use uniffi::Error;
 pub enum YokuError {
     #[error("error: {0}")]
     Common(String),
+    #[error("date conversion error: {0}")]
+    DateConversionError(String),
 }
 
 impl From<anyhow::Error> for YokuError {

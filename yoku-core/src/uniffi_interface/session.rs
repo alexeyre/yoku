@@ -12,9 +12,10 @@ use std::sync::Arc;
 pub async fn create_session(
     db_path: &str,
     model: String,
+    graph_path: &str,
 ) -> std::result::Result<Session, YokuError> {
     let rt = crate::runtime::init_global_runtime_blocking();
-    let session = rt.block_on(Session::new(db_path, model))?;
+    let session = rt.block_on(Session::new(db_path, model, graph_path))?;
     Ok(session)
 }
 

@@ -1,5 +1,6 @@
-use sqlx::FromRow;
+use sqlx::{Decode, Encode, FromRow, Sqlite, Type};
 use std::fmt;
+use std::str::FromStr;
 
 #[derive(Debug, Clone, FromRow)]
 pub struct Muscle {
@@ -70,15 +71,69 @@ pub struct NewRequestString {
     pub string: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkoutStatus {
+    InProgress,
+    Completed,
+}
+
+impl WorkoutStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            WorkoutStatus::InProgress => "in_progress",
+            WorkoutStatus::Completed => "completed",
+        }
+    }
+}
+
+impl FromStr for WorkoutStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "in_progress" => Ok(WorkoutStatus::InProgress),
+            "completed" => Ok(WorkoutStatus::Completed),
+            _ => Err(format!("Invalid workout status: {}", s)),
+        }
+    }
+}
+
+impl fmt::Display for WorkoutStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl Type<Sqlite> for WorkoutStatus {
+    fn type_info() -> sqlx::sqlite::SqliteTypeInfo {
+        <&str as Type<Sqlite>>::type_info()
+    }
+}
+
+impl<'q> Encode<'q, Sqlite> for WorkoutStatus {
+    fn encode_by_ref(
+        &self,
+        args: &mut Vec<sqlx::sqlite::SqliteArgumentValue<'q>>,
+    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+        <&str as Encode<'q, Sqlite>>::encode_by_ref(&self.as_str(), args)
+    }
+}
+
+impl<'r> Decode<'r, Sqlite> for WorkoutStatus {
+    fn decode(value: sqlx::sqlite::SqliteValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
+        let s = <&str as Decode<Sqlite>>::decode(value)?;
+        WorkoutStatus::from_str(s).map_err(|e| e.into())
+    }
+}
+
 #[derive(Debug, Clone, FromRow)]
 pub struct WorkoutSession {
     pub id: i64,
     pub user_id: Option<i64>,
     pub name: Option<String>,
-    pub date: String,
     pub duration_seconds: i64,
     pub notes: Option<String>,
-    pub status: String,
+    pub status: WorkoutStatus,
     pub summary: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -87,10 +142,9 @@ pub struct WorkoutSession {
 pub struct NewWorkoutSession {
     pub user_id: Option<i64>,
     pub name: Option<String>,
-    pub date: String,
     pub duration_seconds: i64,
     pub notes: Option<String>,
-    pub status: Option<String>,
+    pub status: Option<WorkoutStatus>,
 }
 
 #[derive(Debug, Clone, FromRow)]

@@ -14,12 +14,12 @@ actor BackendService {
         case notInitialized
     }
     
-    func initialize(dbPath: String, model: String) async throws {
+    func initialize(dbPath: String, model: String, graphPath: String) async throws {
         if let _ = session, self.databasePath == dbPath, self.model == model {
             return
         }
         
-        let created = try await YokuUniffi.createSession(dbPath: dbPath, model: model)
+        let created = try await YokuUniffi.createSession(dbPath: dbPath, model: model, graphPath: graphPath)
         self.session = created
         self.databasePath = dbPath
         self.model = model

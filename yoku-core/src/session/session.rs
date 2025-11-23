@@ -1,5 +1,7 @@
 use crate::db;
 use crate::llm::LlmInterface;
+use crate::recommendation::GraphManager;
+use crate::recommendation::RecommendationEngine;
 use anyhow::Result;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
@@ -11,6 +13,7 @@ pub struct Session {
     pub workout_id: Mutex<Option<i64>>,
     pub db_pool: SqlitePool,
     pub llm_backend: Arc<LlmInterface>,
+    pub recommendation_engine: RecommendationEngine,
 }
 
 const fn get_openai_api_key() -> &'static str {
@@ -18,7 +21,7 @@ const fn get_openai_api_key() -> &'static str {
 }
 
 impl Session {
-    pub async fn new(db_path: &str, model: String) -> Result<Self> {
+    pub async fn new(db_path: &str, model: String, graph_path: &str) -> Result<Self> {
         let options = SqliteConnectOptions::new()
             .filename(db_path)
             .create_if_missing(true);
@@ -42,10 +45,13 @@ impl Session {
             LlmInterface::new_openai(Some(get_openai_api_key().to_string()), Some(model)).await?,
         );
 
+        let recommendation_engine = RecommendationEngine::new(GraphManager::new(graph_path).await?);
+
         Ok(Self {
             workout_id: Mutex::new(None),
             db_pool: pool,
             llm_backend,
+            recommendation_engine,
         })
     }
 

@@ -11,6 +11,7 @@ struct yokuApp: App {
     @StateObject private var referenceStore = ReferenceStore()
 
     @State private var lastDBPath: String?
+    @State private var lastGraphPath: String?
 
     var body: some Scene {
         WindowGroup {
@@ -20,6 +21,7 @@ struct yokuApp: App {
                         .environmentObject(workoutStore)
                         .environmentObject(historyStore)
                         .environmentObject(referenceStore)
+                        .preferredColorScheme(.dark)
                 } else if let error = setupError {
                     VStack(spacing: 12) {
                         Text("Failed to set up database")
@@ -33,8 +35,8 @@ struct yokuApp: App {
                     Button {
                         Task { @MainActor in
                             do {
-                                if let path = lastDBPath {
-                                    try await workoutStore.setup(dbPath: path, model: "gpt-5-mini")
+                                if let path = lastDBPath, let graphPath = lastGraphPath {
+                                    try await workoutStore.setup(dbPath: path, model: "gpt-5-mini", graphPath: graphPath)
                                     isDatabaseReady = true
                                 }
                             } catch {
@@ -75,10 +77,13 @@ struct yokuApp: App {
                     try FileManager.default.createDirectory(
                         at: appDir, withIntermediateDirectories: true)
                     let dbURL = appDir.appendingPathComponent("app.db")
+                    let graphURL = appDir.appendingPathComponent("graph.db")
                     let dbPath = dbURL.path
+                    let graphPath = graphURL.path
                     lastDBPath = dbPath
+                    lastGraphPath = graphPath
 
-                    try await workoutStore.setup(dbPath: dbPath, model: "gpt-5-mini")
+                    try await workoutStore.setup(dbPath: dbPath, model: "gpt-5-mini", graphPath: graphPath)
                     isDatabaseReady = true
                 } catch {
                     setupError = error
@@ -117,24 +122,11 @@ private struct RootView: View {
                         } else {
                         Text("[ NEW ]")
                             .font(.appButton)
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(.blue)
                         }
                     }
                     .buttonStyle(.plain)
                     .disabled(isPerformingSelection)
-
-                    Button {
-                        Task { @MainActor in
-                            await historyStore.resetDatabase()
-                            try? await workoutStore.setup(dbPath: "", model: "")
-                        }
-                    } label: {
-                        Text("[ RESET ]")
-                            .font(.appButton)
-                            .foregroundStyle(.red)
-                    }
-                    .buttonStyle(.plain)
-
                     Spacer()
 
                     Button {
@@ -199,6 +191,9 @@ private struct RootView: View {
                                         .font(.appBody)
                                         .lineLimit(1)
                                     Spacer(minLength: 0)
+                                    Text(ws.time())
+                                        .font(.appBody)
+                                        .foregroundStyle(.tertiary)
                                     Text(ws.date())
                                         .font(.appBody)
                                         .foregroundStyle(.secondary)
@@ -244,7 +239,7 @@ private struct RootView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("WORKOUTS")
+                    Text("力 - YOKU")
                         .font(.appBody)
                     }
             }

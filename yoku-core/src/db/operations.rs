@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 use crate::{
     db::models::{
         Exercise, Muscle, RequestString, UpdateWorkoutSet, User, WorkoutSession, WorkoutSet,
+        WorkoutStatus,
     },
     llm::ParsedSet,
 };
@@ -43,7 +44,7 @@ pub async fn create_workout_session(
     name: Option<String>,
     notes: Option<String>,
     duration_seconds: Option<i64>,
-    status: Option<String>,
+    status: Option<WorkoutStatus>,
 ) -> Result<WorkoutSession> {
     debug!(
         "create_workout_session called user_id={:?} name={:?} duration_seconds={:?} status={:?}",
@@ -52,20 +53,20 @@ pub async fn create_workout_session(
 
     let date = chrono::Utc::now().date_naive().to_string();
     let dur_secs = duration_seconds.unwrap_or(0) as i64;
-    let status_str = status.unwrap_or_else(|| "in_progress".to_string());
+    let status_enum = status.unwrap_or(WorkoutStatus::InProgress);
     let now = chrono::Utc::now().timestamp();
 
     let res = sqlx::query_as::<_, WorkoutSession>(
-        "INSERT INTO workout_sessions (user_id, name, date, duration_seconds, notes, status, created_at, updated_at)
+        "INSERT INTO workout_sessions (user_id, name, datetime, duration_seconds, notes, status, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
-         RETURNING id, user_id, name, date, duration_seconds, notes, status, summary, created_at, updated_at"
+         RETURNING id, user_id, name, datetime, duration_seconds, notes, status, summary, created_at, updated_at"
     )
     .bind(user_id)
     .bind(name)
     .bind(date)
     .bind(dur_secs)
     .bind(notes)
-    .bind(status_str)
+    .bind(&status_enum)
     .bind(now)
     .fetch_one(pool)
     .await
@@ -85,7 +86,7 @@ pub async fn get_workout_session(pool: &SqlitePool, session_id: i64) -> Result<W
     debug!("get_workout_session called session_id={}", session_id);
 
     sqlx::query_as::<_, WorkoutSession>(
-        "SELECT id, user_id, name, date, duration_seconds, notes, status, summary, created_at, updated_at
+        "SELECT id, user_id, name, datetime, duration_seconds, notes, status, summary, created_at, updated_at
          FROM workout_sessions WHERE id = ?1",
     )
     .bind(session_id)
@@ -99,27 +100,31 @@ pub async fn get_workout_session(pool: &SqlitePool, session_id: i64) -> Result<W
 
 pub async fn get_all_workout_sessions(
     pool: &SqlitePool,
-    status_filter: Option<&str>,
+    status_filter: Option<WorkoutStatus>,
 ) -> Result<Vec<WorkoutSession>> {
     debug!(
         "get_all_workout_sessions called status_filter={:?}",
         status_filter
     );
 
-    let query = if let Some(status) = status_filter {
+    let result = if let Some(status) = status_filter {
         sqlx::query_as::<_, WorkoutSession>(
-            "SELECT id, user_id, name, date, duration_seconds, notes, status, summary, created_at, updated_at
+            "SELECT id, user_id, name, datetime, duration_seconds, notes, status, summary, created_at, updated_at
              FROM workout_sessions WHERE status = ?1",
         )
-        .bind(status)
+        .bind(&status)
+        .fetch_all(pool)
+        .await
     } else {
         sqlx::query_as::<_, WorkoutSession>(
-            "SELECT id, user_id, name, date, duration_seconds, notes, status, summary, created_at, updated_at
+            "SELECT id, user_id, name, datetime, duration_seconds, notes, status, summary, created_at, updated_at
              FROM workout_sessions",
         )
+        .fetch_all(pool)
+        .await
     };
 
-    query.fetch_all(pool).await.map_err(|e| {
+    result.map_err(|e| {
         warn!("get_all_workout_sessions failed: {}", e);
         anyhow::Error::from(e)
     })
@@ -143,10 +148,12 @@ pub async fn delete_workout_session(pool: &SqlitePool, session_id: i64) -> Resul
 pub async fn get_in_progress_workout(pool: &SqlitePool) -> Result<Option<WorkoutSession>> {
     debug!("get_in_progress_workout called");
 
+    let status = WorkoutStatus::InProgress;
     let result = sqlx::query_as::<_, WorkoutSession>(
-        "SELECT id, user_id, name, date, duration_seconds, notes, status, summary, created_at, updated_at
-         FROM workout_sessions WHERE status = 'in_progress' LIMIT 1",
+        "SELECT id, user_id, name, datetime, duration_seconds, notes, status, summary, created_at, updated_at
+         FROM workout_sessions WHERE status = ?1 LIMIT 1",
     )
+    .bind(&status)
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -168,9 +175,11 @@ pub async fn complete_workout_session(
     );
 
     let now = chrono::Utc::now().timestamp();
+    let status = WorkoutStatus::Completed;
     sqlx::query(
-        "UPDATE workout_sessions SET status = 'completed', duration_seconds = ?1, updated_at = ?2 WHERE id = ?3",
+        "UPDATE workout_sessions SET status = ?1, duration_seconds = ?2, updated_at = ?3 WHERE id = ?4",
     )
+    .bind(&status)
     .bind(duration_seconds)
     .bind(now)
     .bind(session_id)
@@ -194,14 +203,15 @@ pub async fn complete_workout_session(
 pub async fn check_in_progress_workout_exists(pool: &SqlitePool) -> Result<bool> {
     debug!("check_in_progress_workout_exists called");
 
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM workout_sessions WHERE status = 'in_progress'")
-            .fetch_one(pool)
-            .await
-            .map_err(|e| {
-                warn!("check_in_progress_workout_exists failed: {}", e);
-                anyhow::Error::from(e)
-            })?;
+    let status = WorkoutStatus::InProgress;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM workout_sessions WHERE status = ?1")
+        .bind(&status)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| {
+            warn!("check_in_progress_workout_exists failed: {}", e);
+            anyhow::Error::from(e)
+        })?;
 
     Ok(count > 0)
 }
@@ -286,7 +296,7 @@ pub async fn get_exercise(pool: &SqlitePool, exercise_id: i64) -> Result<Exercis
 
 pub async fn get_all_exercises(pool: &SqlitePool) -> Result<Vec<Exercise>> {
     debug!("get_all_exercises called");
-    sqlx::query_as::<_, Exercise>(
+    let exercises = sqlx::query_as::<_, Exercise>(
         "SELECT id, slug, name, description, created_at, updated_at FROM exercises",
     )
     .fetch_all(pool)
@@ -294,7 +304,9 @@ pub async fn get_all_exercises(pool: &SqlitePool) -> Result<Vec<Exercise>> {
     .map_err(|e| {
         warn!("get_all_exercises failed: {}", e);
         anyhow::Error::from(e)
-    })
+    })?;
+    debug!("get_all_exercises returned {} exercises", exercises.len());
+    Ok(exercises)
 }
 
 pub async fn get_or_create_exercise(pool: &SqlitePool, exercise_name: &str) -> Result<Exercise> {

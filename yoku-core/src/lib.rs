@@ -1,6 +1,7 @@
 pub mod db;
 pub mod graph;
 pub mod llm;
+pub mod recommendation;
 pub mod runtime;
 pub mod session;
 
