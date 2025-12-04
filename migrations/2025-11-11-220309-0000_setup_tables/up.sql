@@ -1,16 +1,8 @@
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE IF NOT EXISTS muscle_groups (
-    id INTEGER NOT NULL PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
-    updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
-);
-
 CREATE TABLE IF NOT EXISTS muscles (
     id INTEGER NOT NULL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    group_id INTEGER NOT NULL REFERENCES muscle_groups(id) ON DELETE CASCADE,
     created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
     updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
 );
@@ -107,7 +99,6 @@ CREATE INDEX IF NOT EXISTS idx_workout_sets_status ON workout_sets(status);
 
 CREATE INDEX IF NOT EXISTS idx_workout_sessions_user_id ON workout_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_workout_sessions_status ON workout_sessions(status);
-CREATE INDEX IF NOT EXISTS idx_workout_sessions_user_datetime ON workout_sessions(user_id, datetime);
-CREATE INDEX IF NOT EXISTS idx_workout_sessions_datetime ON workout_sessions(datetime);
+CREATE INDEX IF NOT EXISTS idx_workout_sessions_created_at ON workout_sessions(created_at);
 
 CREATE INDEX IF NOT EXISTS idx_request_strings_user_id ON request_strings(user_id);

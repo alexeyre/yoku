@@ -27,6 +27,7 @@ log = "0.4.28"
 env_logger = "0.11.8"
 num_cpus = "1.17.0"
 indradb-lib = { version = "5.0.0", features = ["rocksdb-datastore"] }
+uuid = "1.18.1"
 
 [features]
 default = ["uniffi"]

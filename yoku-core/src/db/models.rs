@@ -1,13 +1,112 @@
+use serde::{Deserialize, Serialize};
 use sqlx::{Decode, Encode, FromRow, Sqlite, Type};
 use std::fmt;
 use std::str::FromStr;
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ExercisePatternType {
+    Unknown,
+    HorizontalPush,
+    HorizontalPull,
+    VerticalPush,
+    VerticalPull,
+    HipHinge,
+    Squat,
+    Lunge,
+    Carry,
+    Rotation,
+    Isolation,
+}
+
+impl ExercisePatternType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ExercisePatternType::Unknown => "unknown",
+            ExercisePatternType::HorizontalPush => "horizontal_push",
+            ExercisePatternType::HorizontalPull => "horizontal_pull",
+            ExercisePatternType::VerticalPush => "vertical_push",
+            ExercisePatternType::VerticalPull => "vertical_pull",
+            ExercisePatternType::HipHinge => "hip_hinge",
+            ExercisePatternType::Squat => "squat",
+            ExercisePatternType::Lunge => "lunge",
+            ExercisePatternType::Carry => "carry",
+            ExercisePatternType::Rotation => "rotation",
+            ExercisePatternType::Isolation => "isolation",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "horizontal_push" => ExercisePatternType::HorizontalPush,
+            "horizontal_pull" => ExercisePatternType::HorizontalPull,
+            "vertical_push" => ExercisePatternType::VerticalPush,
+            "vertical_pull" => ExercisePatternType::VerticalPull,
+            "hip_hinge" => ExercisePatternType::HipHinge,
+            "squat" => ExercisePatternType::Squat,
+            "lunge" => ExercisePatternType::Lunge,
+            "carry" => ExercisePatternType::Carry,
+            "rotation" => ExercisePatternType::Rotation,
+            "isolation" => ExercisePatternType::Isolation,
+            _ => ExercisePatternType::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum InjuryConstraint {
+    #[default]
+    None,
+    AvoidMuscle(i64),
+    AvoidPattern,
+    LimitLoad,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum RestStyle {
+    #[default]
+    Hypertrophy, // moderate rest: 60-90 sec
+    Strength,     // long rest: 3-5 min
+    Conditioning, // short rest: 30-45 sec
+    Giant,        // minimal rest, you absolute monster
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SessionStyle {
+    #[default]
+    Hypertrophy,
+    Strength,
+    Power,
+    Conditioning,
+    Rehab,
+    SkillFocused,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ExperienceLevel {
+    Beginner,
+    #[default]
+    Intermediate,
+    Advanced,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct Muscle {
     pub id: i64,
     pub name: String,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct Equipment {
+    pub id: i64,
+    pub name: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+pub struct NewEquipment {
+    pub name: String,
 }
 
 pub struct NewMuscle {

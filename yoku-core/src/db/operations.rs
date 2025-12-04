@@ -4,8 +4,8 @@ use sqlx::SqlitePool;
 
 use crate::{
     db::models::{
-        Exercise, Muscle, RequestString, UpdateWorkoutSet, User, WorkoutSession, WorkoutSet,
-        WorkoutStatus,
+        Equipment, Exercise, Muscle, RequestString, UpdateWorkoutSet, User, WorkoutSession,
+        WorkoutSet, WorkoutStatus,
     },
     llm::ParsedSet,
 };
@@ -309,6 +309,36 @@ pub async fn get_all_exercises(pool: &SqlitePool) -> Result<Vec<Exercise>> {
     Ok(exercises)
 }
 
+pub async fn get_all_exercises_except(
+    pool: &SqlitePool,
+    avoid_exercise_ids: &[i64],
+) -> Result<Vec<Exercise>> {
+    if avoid_exercise_ids.is_empty() {
+        return get_all_exercises(pool).await;
+    }
+
+    let placeholders = std::iter::repeat("?")
+        .take(avoid_exercise_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let sql = format!(
+        r#"SELECT id, slug, name, description, created_at, updated_at
+        FROM exercises
+        WHERE id NOT IN ({})
+        "#,
+        placeholders
+    );
+    let mut query = sqlx::query_as::<_, Exercise>(&sql);
+    for id in avoid_exercise_ids {
+        query = query.bind(id);
+    }
+    query.fetch_all(pool).await.map_err(|e| {
+        error!("get_all_exercises_except failed: {}", e);
+        anyhow::Error::from(e)
+    })
+}
+
 pub async fn get_or_create_exercise(pool: &SqlitePool, exercise_name: &str) -> Result<Exercise> {
     debug!("get_or_create_exercise called name={}", exercise_name);
     let slug = slugify(exercise_name);
@@ -391,6 +421,47 @@ pub async fn get_or_create_muscle(pool: &SqlitePool, muscle_name: &str) -> Resul
     })?;
 
     info!("created muscle id={} name={}", created.id, created.name);
+    Ok(created)
+}
+
+pub async fn get_or_create_equipment(pool: &SqlitePool, equipment_name: &str) -> Result<Equipment> {
+    debug!("get_or_create_equipment called name={}", equipment_name);
+
+    if let Some(equipment) = sqlx::query_as::<_, Equipment>(
+        "SELECT id, name, created_at, updated_at
+         FROM equipment WHERE name = ?1",
+    )
+    .bind(equipment_name)
+    .fetch_optional(pool)
+    .await?
+    {
+        debug!(
+            "found existing equipment id={} name={}",
+            equipment.id, equipment.name
+        );
+        return Ok(equipment);
+    }
+
+    let now = chrono::Utc::now().timestamp();
+
+    let created = sqlx::query_as::<_, Equipment>(
+        "INSERT INTO equipment (name, created_at, updated_at)
+         VALUES (?1, ?2, ?2)
+         RETURNING id, name, created_at, updated_at",
+    )
+    .bind(equipment_name)
+    .bind(now)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        error!(
+            "get_or_create_equipment failed inserting {}: {}",
+            equipment_name, e
+        );
+        anyhow::Error::from(e)
+    })?;
+
+    info!("created equipment id={} name={}", created.id, created.name);
     Ok(created)
 }
 

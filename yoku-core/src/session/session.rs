@@ -3,6 +3,7 @@ use crate::llm::LlmInterface;
 use crate::recommendation::GraphManager;
 use crate::recommendation::RecommendationEngine;
 use anyhow::Result;
+use indradb::RocksdbDatastore;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 use std::sync::Arc;
@@ -13,7 +14,7 @@ pub struct Session {
     pub workout_id: Mutex<Option<i64>>,
     pub db_pool: SqlitePool,
     pub llm_backend: Arc<LlmInterface>,
-    pub recommendation_engine: RecommendationEngine,
+    pub recommendation_engine: RecommendationEngine<RocksdbDatastore>,
 }
 
 const fn get_openai_api_key() -> &'static str {
@@ -45,7 +46,10 @@ impl Session {
             LlmInterface::new_openai(Some(get_openai_api_key().to_string()), Some(model)).await?,
         );
 
-        let recommendation_engine = RecommendationEngine::new(GraphManager::new(graph_path).await?);
+        let recommendation_engine = RecommendationEngine::new(
+            GraphManager::<RocksdbDatastore>::new(graph_path)?,
+            pool.clone(),
+        );
 
         Ok(Self {
             workout_id: Mutex::new(None),

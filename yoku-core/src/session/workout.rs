@@ -79,7 +79,11 @@ impl Session {
     }
 
     pub async fn get_all_workouts(&self) -> Result<Vec<WorkoutSession>> {
-        crate::db::operations::get_all_workout_sessions(&self.db_pool, Some(WorkoutStatus::Completed)).await
+        crate::db::operations::get_all_workout_sessions(
+            &self.db_pool,
+            Some(WorkoutStatus::Completed),
+        )
+        .await
     }
 
     pub async fn get_all_workouts_including_in_progress(&self) -> Result<Vec<WorkoutSession>> {

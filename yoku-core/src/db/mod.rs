@@ -71,12 +71,10 @@ async fn init_migrations_table(pool: &SqlitePool) -> Result<()> {
 }
 
 async fn is_migration_applied(pool: &SqlitePool, migration_name: &str) -> Result<bool> {
-    let result = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM _migrations WHERE name = ?1",
-    )
-    .bind(migration_name)
-    .fetch_one(pool)
-    .await?;
+    let result = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM _migrations WHERE name = ?1")
+        .bind(migration_name)
+        .fetch_one(pool)
+        .await?;
     Ok(result > 0)
 }
 
